@@ -14,15 +14,10 @@
     "node": ">=22"
   },
   "dependencies": {
-<<<<<<< HEAD
     "dotenv": "^18.0.10",
     "express": "^5.1.0",
     "firebase-admin": "^14.5.1",
     "multer": "^2.5.0",
-=======
-    "express": "^5.1.0",
-    "firebase-admin": "^13.10.0",
->>>>>>> 81dc15830990c3536e7160733ff99fbc99efbdae
     "mysql2": "^3.24.6"
   }
 }

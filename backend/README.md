@@ -1,96 +1,64 @@
 # Planner backend
 
-<<<<<<< HEAD
-Node.js/Express API with Firebase token verification and MySQL migration/seed support.
-
-## Requirements
-
-- ## Requirements
-
-- Node.js 18 or newer
-- npm
-- MySQL 8 or newer
-- Firebase project and Admin credentials
-=======
-This first planner milestone creates and lists student deadlines. It uses Express, MySQL 8 and Firebase Authentication. Dates represent calendar days and have no time or timezone.
->>>>>>> 81dc15830990c3536e7160733ff99fbc99efbdae
+The Express API verifies Firebase ID tokens and uses MySQL for normal application
+storage. Automated tests inject the in-memory store.
 
 ## Run locally
 
-1. Install Node.js 22 or newer. In the backend folder run `npm ci` and `npm test`. The HTTP tests inject authentication and storage doubles.
-2. Create a MySQL database named `smart_daily_planner`. Open `sql/001_deadlines.sql` in MySQL Workbench, select the database as the default schema and execute the script. Give the API's database user SELECT and INSERT access to the table.
-3. Use Firebase Application Default Credentials for the same Firebase project used by the mobile app. For local development keep the service account file outside the repository. The service account needs permission to read Firebase Auth users for disabled-account and revocation checks.
-4. In the same PowerShell terminal set the connection details and start the server. Percent-encode special characters in the MySQL URL credentials.
+1. Install Node.js 22 or newer and run `npm ci` in this directory.
+2. Create the database and application user:
 
-```powershell
-<<<<<<< HEAD
-Copy `.env.example` to `.env` and replace placeholders. Never commit `.env`.
+   ```sql
+   CREATE DATABASE smart_daily_planner CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   CREATE USER 'sdp'@'localhost' IDENTIFIED BY 'change-me';
+   GRANT ALL PRIVILEGES ON smart_daily_planner.* TO 'sdp'@'localhost';
+   ```
+3. Copy `.env.example` to `.env`. Set the MySQL connection values and Firebase
+   Admin credentials. Keep `.env` and service-account credentials out of Git.
+4. Run `npm run migrate`, then `npm start`.
 
-```powershell
-npm install
-npm run migrate
-npm run seed
-npm start
+The server checks MySQL before listening. It does not fall back to memory if the
+database is missing or unavailable; startup fails with a connection error.
+
+Configure MySQL either with `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` and
+`DB_NAME`, or with `MYSQL_URL`. Special characters in URL credentials must be
+percent-encoded. Firebase Admin accepts `FIREBASE_SERVICE_ACCOUNT` as JSON or
+`GOOGLE_APPLICATION_CREDENTIALS` as a file path.
+
+## Entries API
+
+All requests use `Authorization: Bearer <Firebase ID token>`. Ownership is
+derived from the verified token.
+
+The dashboard can load all of the signed-in student's deadlines without date
+filters:
+
+```http
+GET /api/v1/entries
 ```
 
-Create the database first:
+The response is `200` with a `data` array containing only `id`, `title` and
+date-only `dueDate` fields. An empty deadline list is returned as `{"data":[]}`.
+Deadlines written by the earlier `planner_deadlines` schema remain visible;
+new deadlines are stored in the unified `entries` table.
 
-```sql
-CREATE DATABASE smart_daily_planner CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'sdp'@'localhost' IDENTIFIED BY 'change-me';
-GRANT ALL PRIVILEGES ON smart_daily_planner.* TO 'sdp'@'localhost';
+Create a deadline with a calendar date:
+
+```json
+{
+  "kind": "deadline",
+  "title": "Submit MAD report",
+  "dueDate": "2026-11-30"
+}
 ```
 
-Firebase Admin credentials can be supplied with `FIREBASE_SERVICE_ACCOUNT` as JSON or through
-`GOOGLE_APPLICATION_CREDENTIALS`. `FIREBASE_PROJECT_ID` is a development guard; production should
-configure Firebase Admin credentials explicitly.
-```
+The existing timestamp-based `dueAt` form and routine entry contract remain
+supported. Date-range `GET /api/v1/entries?from=...&to=...` requests continue to
+support deadlines and routines; bounds may be date-only or ISO 8601 timestamps.
 
-The server listens on port `3000` by default. Set `PORT` to use another port.
-Check health:
+## Tests
 
-```powershell
-Invoke-RestMethod http://localhost:3000/health
-```
-
-Example authenticated requests:
-
-```powershell
-$headers = @{ Authorization = "Bearer $env:FIREBASE_ID_TOKEN" }
-Invoke-RestMethod -Method Get -Headers $headers http://localhost:3000/api/v1/me
-Invoke-RestMethod -Method Post -Headers $headers -ContentType "application/json" `
-  -Body '{"kind":"deadline","title":"Submit MAD report","dueAt":"2026-11-25T09:00:00Z"}' `
-  http://localhost:3000/api/v1/entries
-Invoke-RestMethod -Method Post -Headers $headers -ContentType "multipart/form-data" `
-  -InFile ".\photo.jpg" `
-  http://localhost:3000/api/v1/photos
-```
-
-The exact contract is in `../docs/backend-api-contract-proposal.md`.
-=======
-$env:MYSQL_URL = "mysql://planner_user:PASSWORD@localhost:3306/smart_daily_planner"
-$env:GOOGLE_APPLICATION_CREDENTIALS = "C:\private\planner-service-account.json"
-npm start
-```
-
-## Mobile API contract
->>>>>>> 81dc15830990c3536e7160733ff99fbc99efbdae
-
-Send a Firebase ID token from the signed-in user's client in the Authorization header. The API derives ownership from that token. In PowerShell the following commands assume that $token holds a test student's Firebase ID token.
-
-```powershell
-$headers = @{ Authorization = "Bearer $token" }
-$url = "http://localhost:3000/api/v1/entries"
-$body = @{kind="deadline"; title="Submit MAD report"; dueDate="2026-11-30"} | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri $url -Headers $headers -ContentType "application/json" -Body $body
-Invoke-RestMethod -Uri "${url}?from=2026-11-01&to=2026-11-30" -Headers $headers
-```
-
-<<<<<<< HEAD
-The current test store is in memory. Production MySQL repository adapters are not yet connected;
-run migration commands against MySQL before deploying database-backed work.
-=======
-POST returns 201 with the created entry under data, including its server-generated id. Titles allow 1–200 characters after trimming. GET returns 200 with an array under data ordered by dueDate and id. Both date filters are optional and inclusive. Validation errors return 400. Missing, revoked or invalid tokens return 401. Firebase-disabled accounts receive 403. GET /health checks the HTTP process only.
-
-For a live smoke test, save an entry, restart Node and list it with the same student's token. Repeat the listing with another student's token to check account isolation.
->>>>>>> 81dc15830990c3536e7160733ff99fbc99efbdae
+Run `npm test`. The API tests use the in-memory store and do not require MySQL or
+Firebase credentials. To enable the restart/owner-isolation integration test,
+set `MYSQL_TEST_URL` to a separate test database, apply migrations to it, and
+rerun `npm test`.

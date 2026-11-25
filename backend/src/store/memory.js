@@ -120,14 +120,27 @@ class MemoryStore {
   async listEntries(ownerId, range, paging) {
     let items = [...this.entries.values()].filter((entry) => entry.ownerId === ownerId);
     items = items.filter((entry) => {
-      if (entry.kind === "deadline") return entry.dueAt >= range.from && entry.dueAt < range.to;
-      return entry.startDate < range.to.slice(0, 10) &&
-        (!entry.repeatUntil || entry.repeatUntil >= range.from.slice(0, 10));
+      if (entry.kind === "deadline") {
+        return (!range.from || entry.dueAt >= range.from) && (!range.to || entry.dueAt < range.to);
+      }
+      return (!range.to || entry.startDate < range.to.slice(0, 10)) &&
+        (!range.from || !entry.repeatUntil || entry.repeatUntil >= range.from.slice(0, 10));
     });
     const total = items.length;
     const start = (paging.page - 1) * paging.pageSize;
     items = items.slice(start, start + paging.pageSize).map((entry) => this.serializeEntry(entry));
     return { items, page: paging.page, pageSize: paging.pageSize, total };
+  }
+
+  async listDashboardDeadlines(ownerId) {
+    return [...this.entries.values()]
+      .filter((entry) => entry.ownerId === ownerId && entry.kind === "deadline")
+      .map((entry) => ({
+        id: entry.id,
+        title: entry.title,
+        dueDate: entry.dueDate || entry.dueAt.slice(0, 10),
+      }))
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.id.localeCompare(b.id));
   }
 
   async updateEntry(ownerId, id, fields) {

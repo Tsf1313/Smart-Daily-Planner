@@ -1,9 +1,9 @@
 const express = require("express");
-<<<<<<< HEAD
 const multer = require("multer");
 const { MemoryStore } = require("./store/memory");
 const { createFirebaseVerifier } = require("./auth");
 const { validateEntry, validateFacilitySearch, validatePaging } = require("./validation");
+const { mountDeadlines, fail } = require("./deadlines");
 
 function errorResponse(response, status, code, message, details) {
   const body = { error: { code, message } };
@@ -13,16 +13,20 @@ function errorResponse(response, status, code, message, details) {
 
 function createApp(options = {}) {
   const app = express();
-  const store = options.store || new MemoryStore();
-  const verifyFirebaseToken =
-    options.verifyFirebaseToken || createFirebaseVerifier();
-
   app.disable("x-powered-by");
   app.use(express.json({ limit: "1mb" }));
-
   app.get("/health", (_request, response) => {
     response.status(200).json({ status: "ok" });
   });
+
+  if (options.verifyUser && options.store) {
+    mountDeadlines(app, { verifyUser: options.verifyUser, store: options.store });
+    app.use(handleError);
+    return app;
+  }
+
+  const store = options.store || new MemoryStore();
+  const verifyFirebaseToken = options.verifyFirebaseToken || createFirebaseVerifier();
 
   app.use("/api/v1", async (request, response, next) => {
     if (request.method === "OPTIONS") return next();
@@ -30,16 +34,20 @@ function createApp(options = {}) {
     if (!authorization.startsWith("Bearer ")) {
       return errorResponse(response, 401, "UNAUTHENTICATED", "Missing authentication token.");
     }
+    let claims;
     try {
-      const claims = await verifyFirebaseToken(authorization.slice(7));
-      const profile = await store.getOrCreateProfile(claims);
-      if (profile.status === "suspended") {
-        return errorResponse(response, 403, "ACCOUNT_SUSPENDED", "This account is suspended.");
-      }
-      request.profile = profile;
-      next();
+      claims = await verifyFirebaseToken(authorization.slice(7));
     } catch (_error) {
       return errorResponse(response, 401, "UNAUTHENTICATED", "Invalid or expired authentication token.");
+    }
+    try {
+      request.profile = await store.getOrCreateProfile(claims);
+      if (request.profile.status === "suspended") {
+        return errorResponse(response, 403, "ACCOUNT_SUSPENDED", "This account is suspended.");
+      }
+      next();
+    } catch (error) {
+      next(error);
     }
   });
 
@@ -71,6 +79,12 @@ function createApp(options = {}) {
     const range = validateRange(request.query);
     if (!range.valid) {
       return errorResponse(response, 400, "VALIDATION_ERROR", "Please check the submitted fields.", range.details);
+    }
+    if (!request.query.from && !request.query.to) {
+      const deadlines = await store.listDashboardDeadlines(request.profile.id);
+      return response.json({
+        data: deadlines.map(({ id, title, dueDate }) => ({ id, title, dueDate })),
+      });
     }
     const paging = validatePaging(request.query);
     if (!paging.valid) {
@@ -121,7 +135,10 @@ function createApp(options = {}) {
 
   app.get("/api/v1/routine-occurrences", async (request, response) => {
     const range = validateRange(request.query);
-    if (!range.valid) {
+    if (!range.valid || !range.value.from || !range.value.to) {
+      if (range.valid) {
+        range.details = { from: "from is required.", to: "to is required." };
+      }
       return errorResponse(response, 400, "VALIDATION_ERROR", "Please check the submitted fields.", range.details);
     }
     const occurrences = await store.listOccurrences(request.profile.id, range.value);
@@ -240,30 +257,48 @@ function createApp(options = {}) {
     response.json({ data: { items: await store.listActions(request.query) } });
   });
 
-  app.use((error, _request, response, _next) => {
-    if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
-      return errorResponse(response, 413, "UPLOAD_TOO_LARGE", "Photo must not exceed 5 MB.");
-    }
-    console.error(error);
-    return errorResponse(response, 500, "INTERNAL_ERROR", "An unexpected server error occurred.");
-  });
-
+  app.use(handleError);
   return app;
 }
 
 function validateRange(query) {
-  if (!query.from || !query.to) {
-    return { valid: false, details: { from: "from is required.", to: "to is required." } };
+  const datePattern = /^[1-9]\d{3}-\d{2}-\d{2}$/;
+  const normalize = (value, isEnd) => {
+    if (value === undefined) return null;
+    if (typeof value !== "string") return null;
+    if (datePattern.test(value)) {
+      const date = new Date(`${value}T00:00:00.000Z`);
+      if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) return null;
+      if (isEnd) date.setUTCDate(date.getUTCDate() + 1);
+      return date.toISOString();
+    }
+    const date = new Date(value);
+    return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+  };
+  const from = normalize(query.from, false);
+  const to = normalize(query.to, true);
+  if ((query.from !== undefined && !from) || (query.to !== undefined && !to)) {
+    return { valid: false, details: { range: "from and to must be valid dates or ISO 8601 timestamps." } };
   }
-  const from = new Date(query.from);
-  const to = new Date(query.to);
-  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
-    return { valid: false, details: { range: "from and to must be ISO 8601 timestamps." } };
-  }
-  if (to <= from || to - from > 31 * 24 * 60 * 60 * 1000) {
+  if (from && to && (to <= from || to - from > 31 * 24 * 60 * 60 * 1000)) {
     return { valid: false, details: { range: "Range must be positive and no longer than 31 days." } };
   }
-  return { valid: true, value: { from: from.toISOString(), to: to.toISOString() } };
+  return { valid: true, value: { from, to } };
+}
+
+function handleError(error, _request, response, _next) {
+  if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
+    return errorResponse(response, 413, "UPLOAD_TOO_LARGE", "Photo must not exceed 5 MB.");
+  }
+  console.error("Planner request failed:", error.code || error.name, error.message);
+  if (["ECONNREFUSED", "ECONNRESET", "ER_ACCESS_DENIED_ERROR", "ER_DBACCESS_DENIED_ERROR",
+       "ENOTFOUND", "ETIMEDOUT", "PROTOCOL_CONNECTION_LOST",
+       "PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR", "ER_NO_SUCH_TABLE", "MYSQL_CONFIG_MISSING"].includes(error.code)) {
+    return errorResponse(response, 503, "DATABASE_UNAVAILABLE", "MySQL is unavailable; the request was not saved.");
+  }
+  if (error.type === "entity.parse.failed") return fail(response, 400, "INVALID_JSON", "Invalid JSON body.");
+  if (error.type === "entity.too.large") return fail(response, 413, "BODY_TOO_LARGE", "Request body too large.");
+  return errorResponse(response, 500, "INTERNAL_ERROR", "An unexpected server error occurred.");
 }
 
 function validateFacility(body, patch = false) {
@@ -295,25 +330,4 @@ function validateFacility(body, patch = false) {
 
 const defaultApp = createApp();
 module.exports = defaultApp;
-=======
-const { mountDeadlines, fail } = require("./deadlines");
-const services = require("./services");
-
-function createApp(dependencies = services) {
-  const app = express();
-  app.disable("x-powered-by");
-  app.use(express.json());
-  app.get("/health", (_req, res) => res.json({ status: "ok" }));
-  mountDeadlines(app, dependencies);
-  app.use((error, _req, res, _next) => {
-    if (error.type === "entity.parse.failed") return fail(res, 400, "INVALID_JSON", "Invalid JSON body.");
-    if (error.type === "entity.too.large") return fail(res, 413, "BODY_TOO_LARGE", "Request body too large.");
-    console.error("Planner request failed", error.code || error.name);
-    return fail(res, 500, "INTERNAL_ERROR", "Unable to complete the request.");
-  });
-  return app;
-}
-
-module.exports = createApp();
->>>>>>> 81dc15830990c3536e7160733ff99fbc99efbdae
 module.exports.createApp = createApp;

@@ -8,6 +8,9 @@ async function startApp(store = new MemoryStore()) {
     store,
     verifyFirebaseToken: async (token) => {
       if (token === "bad") throw new Error("invalid");
+      if (token === "student-b") {
+        return { firebaseUid: "other-student-firebase", name: "Other Student", email: "other@example.test" };
+      }
       if (token === "admin") {
         return { firebaseUid: "admin-firebase", name: "Lim Admin", email: "admin@example.test" };
       }
@@ -43,6 +46,31 @@ test("profile requires Firebase authentication", async (t) => {
   assert.equal(bad.status, 401);
 });
 
+test("reports a database outage instead of falling back to memory", async (t) => {
+  const app = createApp({
+    store: {
+      async getOrCreateProfile() {
+        throw Object.assign(new Error("MySQL connection refused."), { code: "ECONNREFUSED" });
+      },
+    },
+    verifyFirebaseToken: async () => ({ firebaseUid: "student-firebase" }),
+  });
+  const server = app.listen(0);
+  await new Promise((resolve) => server.once("listening", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/v1/entries`, {
+    headers: { Authorization: "Bearer student" },
+  });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    error: {
+      code: "DATABASE_UNAVAILABLE",
+      message: "MySQL is unavailable; the request was not saved.",
+    },
+  });
+});
+
 test("creates and completes a deadline", async (t) => {
   const { base, server } = await startApp();
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -67,6 +95,43 @@ test("creates and completes a deadline", async (t) => {
   });
   assert.equal(completed.response.status, 200);
   assert.equal(completed.body.data.isCompleted, true);
+});
+
+test("dashboard lists only owned deadlines with date-only dueDate and no required filters", async (t) => {
+  const { base, server } = await startApp();
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const created = await request(base, "POST", "/api/v1/entries", {
+    body: { kind: "deadline", title: "Submit MAD report", dueDate: "2026-11-30" },
+  });
+  assert.equal(created.response.status, 201);
+
+  const listed = await request(base, "GET", "/api/v1/entries");
+  assert.equal(listed.response.status, 200);
+  assert.deepEqual(listed.body, {
+    data: [{ id: created.body.data.id, title: "Submit MAD report", dueDate: "2026-11-30" }],
+  });
+
+  const otherStudent = await request(base, "GET", "/api/v1/entries", {
+    headers: { Authorization: "Bearer student-b" },
+  });
+  assert.equal(otherStudent.response.status, 200);
+  assert.deepEqual(otherStudent.body, { data: [] });
+
+  const routine = await request(base, "POST", "/api/v1/entries", {
+    body: {
+      kind: "routine",
+      title: "Study",
+      startDate: "2026-11-25",
+      startTime: "20:00",
+      endTime: "21:00",
+      repeat: "none",
+      weekdays: [],
+    },
+  });
+  assert.equal(routine.response.status, 201);
+  const ranged = await request(base, "GET", "/api/v1/entries?from=2026-11-25&to=2026-11-30");
+  assert.equal(ranged.response.status, 200);
+  assert.ok(ranged.body.data.items.some((entry) => entry.id === routine.body.data.id));
 });
 
 test("generates stable weekly occurrence IDs and completes one occurrence", async (t) => {

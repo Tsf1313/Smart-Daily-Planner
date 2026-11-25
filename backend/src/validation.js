@@ -2,6 +2,12 @@ function isString(value) {
   return typeof value === "string";
 }
 
+function validDateOnly(value) {
+  if (!isString(value) || !/^[1-9]\d{3}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
 function validateLocation(location) {
   if (location === undefined || location === null) return { valid: true, value: null };
   if (typeof location !== "object" || Array.isArray(location)) {
@@ -73,8 +79,15 @@ function validateEntry(body, mode) {
     else value.photoId = body.photoId;
   }
 
-  if (body.kind === "deadline" || (mode === "patch" && body.dueAt !== undefined)) {
-    if (body.dueAt !== undefined) {
+  if (body.kind === "deadline" || (mode === "patch" && (body.dueAt !== undefined || body.dueDate !== undefined))) {
+    if (body.dueDate !== undefined) {
+      if (body.dueAt !== undefined) details.dueDate = "Provide dueDate or dueAt, not both.";
+      else if (!validDateOnly(body.dueDate)) details.dueDate = "dueDate must use a valid YYYY-MM-DD date.";
+      else {
+        value.dueDate = body.dueDate;
+        value.dueAt = `${body.dueDate}T00:00:00.000Z`;
+      }
+    } else if (body.dueAt !== undefined) {
       const due = new Date(body.dueAt);
       if (typeof body.dueAt !== "string" || Number.isNaN(due.getTime())) details.dueAt = "dueAt must be an ISO 8601 timestamp.";
       else value.dueAt = due.toISOString();
@@ -143,4 +156,4 @@ function validateFacilitySearch(query) {
   return { valid: true, value: { latitude, longitude, radiusMeters } };
 }
 
-module.exports = { validateEntry, validateLocation, validateFacilitySearch, validatePaging };
+module.exports = { validateEntry, validateLocation, validateFacilitySearch, validatePaging, validDateOnly };
