@@ -1,4 +1,7 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
+
+import 'package:material_ui/material_ui.dart';
+
 import '../../../../app/app_theme.dart';
 import '../../../planner/data/models/task_model.dart';
 import '../../../planner/data/repositories/task_store.dart';
@@ -6,7 +9,9 @@ import '../../../planner/presentation/pages/add_task_screen.dart';
 import '../../../planner/presentation/pages/task_detail_screen.dart';
 
 class CalendarScreen extends StatefulWidget {
-  const CalendarScreen({super.key});
+  const CalendarScreen({super.key, this.store});
+
+  final TaskStore? store;
 
   @override
   State<CalendarScreen> createState() => _CalendarScreenState();
@@ -16,6 +21,13 @@ class _CalendarScreenState extends State<CalendarScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   DateTime _selectedDate = DateTime.now();
+  TaskStore get _store => widget.store ?? TaskStore.instance;
+
+  void _goToDate(DateTime date) {
+    setState(() => _selectedDate = date);
+    unawaited(_store.load(around: date));
+  }
+
   String _categoryFilter = 'All';
 
   @override
@@ -35,7 +47,7 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   @override
   Widget build(BuildContext context) {
-    final store = TaskStore.instance;
+    final store = _store;
 
     return ListenableBuilder(
       listenable: store,
@@ -61,7 +73,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                     height: 38,
                     decoration: BoxDecoration(
                       color: _categoryFilter == 'All'
-                          ? AppColors.primaryLight.withOpacity(0.6)
+                          ? AppColors.primaryLight.withValues(alpha: 0.6)
                           : AppColors.primary,
                       borderRadius: BorderRadius.circular(10),
                     ),
@@ -103,18 +115,23 @@ class _CalendarScreenState extends State<CalendarScreen>
             ],
           ),
           floatingActionButton: FloatingActionButton(
-            backgroundColor: store.offlineMode ? Colors.grey : AppColors.primary,
+            backgroundColor: store.offlineMode
+                ? Colors.grey
+                : AppColors.primary,
             onPressed: () async {
               if (store.offlineMode) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Offline mode: cannot add tasks.')),
+                  const SnackBar(
+                    content: Text('Offline mode: cannot add tasks.'),
+                  ),
                 );
                 return;
               }
-              final newTask = await Navigator.push<Task>(
+              await Navigator.push<void>(
                 context,
                 MaterialPageRoute(
                   builder: (_) => AddTaskScreen(
+                    store: store,
                     task: Task(
                       title: '',
                       type: 'deadline',
@@ -125,9 +142,6 @@ class _CalendarScreenState extends State<CalendarScreen>
                   ),
                 ),
               );
-              if (newTask != null) {
-                store.addTask(newTask);
-              }
             },
             child: const Icon(Icons.add),
           ),
@@ -155,15 +169,14 @@ class _CalendarScreenState extends State<CalendarScreen>
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               InkWell(
-                onTap: () => setState(() {
-                  _selectedDate = _selectedDate.subtract(const Duration(days: 7));
-                }),
+                onTap: () =>
+                    _goToDate(_selectedDate.subtract(const Duration(days: 7))),
                 borderRadius: BorderRadius.circular(10),
                 child: Container(
                   width: 34,
                   height: 34,
                   decoration: BoxDecoration(
-                    color: AppColors.primaryLight.withOpacity(0.6),
+                    color: AppColors.primaryLight.withValues(alpha: 0.6),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: const Icon(
@@ -174,7 +187,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                 ),
               ),
               GestureDetector(
-                onTap: () => setState(() => _selectedDate = DateTime.now()),
+                onTap: () => _goToDate(DateTime.now()),
                 child: Text(
                   _monthYearLabel(_selectedDate),
                   style: const TextStyle(
@@ -185,15 +198,14 @@ class _CalendarScreenState extends State<CalendarScreen>
                 ),
               ),
               InkWell(
-                onTap: () => setState(() {
-                  _selectedDate = _selectedDate.add(const Duration(days: 7));
-                }),
+                onTap: () =>
+                    _goToDate(_selectedDate.add(const Duration(days: 7))),
                 borderRadius: BorderRadius.circular(10),
                 child: Container(
                   width: 34,
                   height: 34,
                   decoration: BoxDecoration(
-                    color: AppColors.primaryLight.withOpacity(0.6),
+                    color: AppColors.primaryLight.withValues(alpha: 0.6),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: const Icon(
@@ -220,16 +232,21 @@ class _CalendarScreenState extends State<CalendarScreen>
 
                     return Expanded(
                       child: GestureDetector(
-                        onTap: () => setState(() => _selectedDate = day),
+                        onTap: () => _goToDate(day),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 180),
                           margin: const EdgeInsets.symmetric(horizontal: 2),
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           decoration: BoxDecoration(
-                            color: isSelected ? AppColors.primary : Colors.transparent,
+                            color: isSelected
+                                ? AppColors.primary
+                                : Colors.transparent,
                             borderRadius: BorderRadius.circular(12),
                             border: isToday && !isSelected
-                                ? Border.all(color: AppColors.primary, width: 1.5)
+                                ? Border.all(
+                                    color: AppColors.primary,
+                                    width: 1.5,
+                                  )
                                 : null,
                           ),
                           child: Column(
@@ -254,8 +271,8 @@ class _CalendarScreenState extends State<CalendarScreen>
                                   color: isSelected
                                       ? Colors.white
                                       : (isToday
-                                          ? AppColors.primary
-                                          : AppColors.textPrimary),
+                                            ? AppColors.primary
+                                            : AppColors.textPrimary),
                                 ),
                               ),
                               const SizedBox(height: 4),
@@ -266,8 +283,10 @@ class _CalendarScreenState extends State<CalendarScreen>
                                   shape: BoxShape.circle,
                                   color: hasTask
                                       ? (isSelected
-                                          ? Colors.white.withOpacity(0.85)
-                                          : AppColors.primary)
+                                            ? Colors.white.withValues(
+                                                alpha: 0.85,
+                                              )
+                                            : AppColors.primary)
                                       : Colors.transparent,
                                 ),
                               ),
@@ -333,7 +352,10 @@ class _CalendarScreenState extends State<CalendarScreen>
                       padding: const EdgeInsets.only(top: 8),
                       child: Text(
                         _formatHour(hour),
-                        style: const TextStyle(fontSize: 11, color: AppColors.textHint),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textHint,
+                        ),
                         textAlign: TextAlign.right,
                       ),
                     ),
@@ -344,7 +366,9 @@ class _CalendarScreenState extends State<CalendarScreen>
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Container(height: 1, color: const Color(0xFFE5E7EB)),
-                        ...hourRoutines.map((task) => _buildTimelineEvent(task)),
+                        ...hourRoutines.map(
+                          (task) => _buildTimelineEvent(task),
+                        ),
                         if (hourRoutines.isEmpty) const SizedBox(height: 48),
                       ],
                     ),
@@ -365,7 +389,11 @@ class _CalendarScreenState extends State<CalendarScreen>
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => TaskDetailScreen(task: task, occurrenceDate: _selectedDate),
+          builder: (_) => TaskDetailScreen(
+            task: task,
+            store: _store,
+            occurrenceDate: _selectedDate,
+          ),
         ),
       ),
       child: Container(
@@ -393,7 +421,11 @@ class _CalendarScreenState extends State<CalendarScreen>
             ),
             Text(
               'Due',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color),
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
             ),
           ],
         ),
@@ -422,7 +454,9 @@ class _CalendarScreenState extends State<CalendarScreen>
             Container(
               padding: const EdgeInsets.symmetric(vertical: 6),
               decoration: const BoxDecoration(
-                border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB), width: 1)),
+                border: Border(
+                  bottom: BorderSide(color: Color(0xFFE5E7EB), width: 1),
+                ),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -462,6 +496,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                   MaterialPageRoute(
                                     builder: (_) => TaskDetailScreen(
                                       task: task,
+                                      store: _store,
                                       occurrenceDate: day,
                                     ),
                                   ),
@@ -469,14 +504,21 @@ class _CalendarScreenState extends State<CalendarScreen>
                                 child: Container(
                                   width: double.infinity,
                                   margin: const EdgeInsets.symmetric(
-                                      horizontal: 2, vertical: 2),
+                                    horizontal: 2,
+                                    vertical: 2,
+                                  ),
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 4, vertical: 4),
+                                    horizontal: 4,
+                                    vertical: 4,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: _eventBgColor(task),
                                     borderRadius: BorderRadius.circular(6),
                                     border: Border(
-                                      left: BorderSide(color: color, width: 2.5),
+                                      left: BorderSide(
+                                        color: color,
+                                        width: 2.5,
+                                      ),
                                     ),
                                   ),
                                   child: Text(
@@ -521,7 +563,10 @@ class _CalendarScreenState extends State<CalendarScreen>
                             child: Align(
                               alignment: Alignment.topRight,
                               child: Padding(
-                                padding: const EdgeInsets.only(top: 4, right: 8),
+                                padding: const EdgeInsets.only(
+                                  top: 4,
+                                  right: 8,
+                                ),
                                 child: Text(
                                   _formatHour(hour),
                                   style: const TextStyle(
@@ -550,7 +595,9 @@ class _CalendarScreenState extends State<CalendarScreen>
                                     decoration: const BoxDecoration(
                                       border: Border(
                                         top: BorderSide(
-                                            color: Color(0xFFF0F0F5), width: 1),
+                                          color: Color(0xFFF0F0F5),
+                                          width: 1,
+                                        ),
                                       ),
                                     ),
                                     child: Row(
@@ -560,7 +607,9 @@ class _CalendarScreenState extends State<CalendarScreen>
                                             decoration: BoxDecoration(
                                               border: Border(
                                                 left: BorderSide(
-                                                  color: const Color(0xFFF0F0F5),
+                                                  color: const Color(
+                                                    0xFFF0F0F5,
+                                                  ),
                                                   width: col == 0 ? 1 : 0.8,
                                                 ),
                                               ),
@@ -573,26 +622,38 @@ class _CalendarScreenState extends State<CalendarScreen>
                                 }),
                               ),
                               ...List.generate(7, (dayIndex) {
-                                final day = startOfWeek.add(Duration(days: dayIndex));
+                                final day = startOfWeek.add(
+                                  Duration(days: dayIndex),
+                                );
                                 final dayRoutines = tasks
-                                    .where((t) => t.isRoutine && t.occursOn(day))
+                                    .where(
+                                      (t) => t.isRoutine && t.occursOn(day),
+                                    )
                                     .toList();
 
                                 return dayRoutines.map((task) {
                                   final startH = task.startTime?.hour ?? 9;
                                   final startM = task.startTime?.minute ?? 0;
-                                  final endH = task.endTime?.hour ?? (startH + 1);
+                                  final endH =
+                                      task.endTime?.hour ?? (startH + 1);
                                   final endM = task.endTime?.minute ?? startM;
 
-                                  final clampedStart = startH.clamp(startHour, endHour);
-                                  final top = (clampedStart - startHour) * hourHeight +
+                                  final clampedStart = startH.clamp(
+                                    startHour,
+                                    endHour,
+                                  );
+                                  final top =
+                                      (clampedStart - startHour) * hourHeight +
                                       (startM / 60.0) * hourHeight +
                                       2;
                                   final durationHours =
-                                      ((endH * 60 + endM) - (startH * 60 + startM)) /
-                                          60.0;
+                                      ((endH * 60 + endM) -
+                                          (startH * 60 + startM)) /
+                                      60.0;
                                   final blockHeight =
-                                      (durationHours.clamp(0.75, 6.0) * hourHeight) - 4;
+                                      (durationHours.clamp(0.75, 6.0) *
+                                          hourHeight) -
+                                      4;
 
                                   final accentColor = _eventAccentColor(task);
                                   final bgColor = _eventBgColor(task);
@@ -609,19 +670,26 @@ class _CalendarScreenState extends State<CalendarScreen>
                                         MaterialPageRoute(
                                           builder: (_) => TaskDetailScreen(
                                             task: task,
+                                            store: _store,
                                             occurrenceDate: day,
                                           ),
                                         ),
                                       ),
                                       child: Container(
                                         padding: const EdgeInsets.symmetric(
-                                            horizontal: 4, vertical: 6),
+                                          horizontal: 4,
+                                          vertical: 6,
+                                        ),
                                         decoration: BoxDecoration(
                                           color: bgColor,
-                                          borderRadius: BorderRadius.circular(8),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
                                           border: Border(
                                             left: BorderSide(
-                                                color: accentColor, width: 3),
+                                              color: accentColor,
+                                              width: 3,
+                                            ),
                                           ),
                                         ),
                                         child: Text(
@@ -667,7 +735,11 @@ class _CalendarScreenState extends State<CalendarScreen>
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => TaskDetailScreen(task: task, occurrenceDate: _selectedDate),
+          builder: (_) => TaskDetailScreen(
+            task: task,
+            store: _store,
+            occurrenceDate: _selectedDate,
+          ),
         ),
       ),
       child: Container(
@@ -690,8 +762,13 @@ class _CalendarScreenState extends State<CalendarScreen>
                 decoration: isDone ? TextDecoration.lineThrough : null,
               ),
             ),
-            Text('$timeRange · ${task.category}',
-                style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+            Text(
+              '$timeRange · ${task.category}',
+              style: const TextStyle(
+                fontSize: 11,
+                color: AppColors.textSecondary,
+              ),
+            ),
           ],
         ),
       ),
@@ -711,19 +788,23 @@ class _CalendarScreenState extends State<CalendarScreen>
           children: [
             const Padding(
               padding: EdgeInsets.all(16),
-              child: Text('Filter Calendar by Category',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              child: Text(
+                'Filter Calendar by Category',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
             ),
-            ...categories.map((cat) => ListTile(
-                  title: Text(cat),
-                  trailing: _categoryFilter == cat
-                      ? const Icon(Icons.check, color: AppColors.primary)
-                      : null,
-                  onTap: () {
-                    setState(() => _categoryFilter = cat);
-                    Navigator.pop(context);
-                  },
-                )),
+            ...categories.map(
+              (cat) => ListTile(
+                title: Text(cat),
+                trailing: _categoryFilter == cat
+                    ? const Icon(Icons.check, color: AppColors.primary)
+                    : null,
+                onTap: () {
+                  setState(() => _categoryFilter = cat);
+                  Navigator.pop(context);
+                },
+              ),
+            ),
           ],
         ),
       ),
@@ -758,8 +839,19 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   String _monthYearLabel(DateTime date) {
     const months = [
-      '', 'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
+      '',
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
     ];
     return '${months[date.month]} ${date.year}';
   }

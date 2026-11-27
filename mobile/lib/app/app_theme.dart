@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 class AppColors {
   // Primary
@@ -39,6 +39,7 @@ class AppTheme {
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
+      fontFamily: 'Poppins',
       colorScheme: ColorScheme.fromSeed(
         seedColor: AppColors.primary,
         primary: AppColors.primary,
@@ -47,6 +48,28 @@ class AppTheme {
         error: AppColors.error,
       ),
       scaffoldBackgroundColor: AppColors.background,
+      navigationBarTheme: NavigationBarThemeData(
+        height: 64,
+        backgroundColor: AppColors.surface,
+        indicatorColor: AppColors.primaryLight,
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: states.contains(WidgetState.selected)
+                ? AppColors.primary
+                : AppColors.textSecondary,
+          ),
+        ),
+        iconTheme: WidgetStateProperty.resolveWith(
+          (states) => IconThemeData(
+            size: 21,
+            color: states.contains(WidgetState.selected)
+                ? AppColors.primary
+                : AppColors.textSecondary,
+          ),
+        ),
+      ),
       appBarTheme: const AppBarTheme(
         backgroundColor: AppColors.surface,
         elevation: 0,
@@ -63,7 +86,9 @@ class AppTheme {
           backgroundColor: AppColors.primary,
           foregroundColor: Colors.white,
           minimumSize: const Size(double.infinity, 52),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
           textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           elevation: 0,
         ),
@@ -71,7 +96,10 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: AppColors.surface,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
@@ -93,7 +121,7 @@ class AppTheme {
       cardTheme: CardThemeData(
         color: AppColors.cardBg,
         elevation: 2,
-        shadowColor: AppColors.primary.withOpacity(0.1),
+        shadowColor: AppColors.primary.withValues(alpha: 0.1),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(

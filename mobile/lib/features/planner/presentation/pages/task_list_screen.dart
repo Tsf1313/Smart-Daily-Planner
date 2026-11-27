@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
+
 import '../../../../app/app_theme.dart';
 import '../../data/models/task_model.dart';
 import '../../data/repositories/task_store.dart';
@@ -8,7 +9,9 @@ import 'add_task_screen.dart';
 import 'task_detail_screen.dart';
 
 class TaskListScreen extends StatefulWidget {
-  const TaskListScreen({super.key});
+  const TaskListScreen({super.key, this.store});
+
+  final TaskStore? store;
 
   @override
   State<TaskListScreen> createState() => _TaskListScreenState();
@@ -29,7 +32,11 @@ class _TaskListScreenState extends State<TaskListScreen> {
 
   List<Task> _filterTasks(List<Task> all) {
     return all.where((t) {
-      final today = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+      final today = DateTime(
+        DateTime.now().year,
+        DateTime.now().month,
+        DateTime.now().day,
+      );
       final dueDay = DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day);
       final isDoneToday = t.isCompletedOn(today);
       final matchesStatus = switch (_selectedFilter) {
@@ -40,7 +47,8 @@ class _TaskListScreenState extends State<TaskListScreen> {
       };
       final matchesCategory =
           _selectedCategory == 'All' || t.category == _selectedCategory;
-      final matchesSearch = _searchQuery.isEmpty ||
+      final matchesSearch =
+          _searchQuery.isEmpty ||
           t.title.toLowerCase().contains(_searchQuery.toLowerCase()) ||
           t.category.toLowerCase().contains(_searchQuery.toLowerCase());
       return matchesStatus && matchesCategory && matchesSearch;
@@ -49,7 +57,7 @@ class _TaskListScreenState extends State<TaskListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final store = TaskStore.instance;
+    final store = widget.store ?? TaskStore.instance;
 
     return ListenableBuilder(
       listenable: store,
@@ -93,7 +101,17 @@ class _TaskListScreenState extends State<TaskListScreen> {
           ),
           body: Column(
             children: [
-              if (store.offlineMode) _buildOfflineBanner(),
+              if (store.loading) const LinearProgressIndicator(),
+              if (store.loadError case final String error)
+                ListTile(
+                  title: Text(error),
+                  trailing: TextButton(
+                    onPressed: store.load,
+                    child: const Text('Retry'),
+                  ),
+                )
+              else if (store.offlineMode)
+                _buildOfflineBanner(),
               _buildFilterChips(),
               _buildStatsRow(store),
               Expanded(
@@ -104,30 +122,50 @@ class _TaskListScreenState extends State<TaskListScreen> {
                         subtitle: 'Tap the + button to add a new task.',
                       )
                     : ListView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
                         itemCount: filtered.length,
                         itemBuilder: (context, index) {
                           final task = filtered[index];
                           return _TaskCard(
                             task: task,
                             offlineMode: store.offlineMode,
-                            onToggle: (_) {
+                            onToggle: (_) async {
                               if (store.offlineMode) {
                                 _showOfflineToast();
                                 return;
                               }
-                              if (task.id != null) store.toggleComplete(task.id!);
+                              final id = task.id;
+                              if (id == null) return;
+                              final warning = await store.toggleComplete(id);
+                              if (context.mounted && warning != null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(warning)),
+                                );
+                              }
                             },
                             onTap: () {
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (_) => TaskDetailScreen(task: task),
+                                  builder: (_) => TaskDetailScreen(
+                                    task: task,
+                                    store: store,
+                                  ),
                                 ),
                               );
                             },
-                            onDelete: () {
-                              if (task.id != null) store.deleteTask(task.id!);
+                            onDelete: () async {
+                              final id = task.id;
+                              if (id == null) return;
+                              final warning = await store.deleteTask(id);
+                              if (context.mounted && warning != null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(warning)),
+                                );
+                              }
                             },
                           );
                         },
@@ -138,16 +176,17 @@ class _TaskListScreenState extends State<TaskListScreen> {
           floatingActionButton: FloatingActionButton(
             onPressed: store.offlineMode
                 ? _showOfflineToast
-                : () async {
-                    final newTask = await Navigator.push<Task>(
-                      context,
-                      MaterialPageRoute(builder: (_) => const AddTaskScreen()),
-                    );
-                    if (newTask != null) {
-                      store.addTask(newTask);
-                    }
-                  },
-            backgroundColor: store.offlineMode ? Colors.grey : AppColors.primary,
+                : store.loading
+                ? null
+                : () => Navigator.push<void>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AddTaskScreen(store: store),
+                    ),
+                  ),
+            backgroundColor: store.offlineMode
+                ? Colors.grey
+                : AppColors.primary,
             child: const Icon(Icons.add),
           ),
         );
@@ -158,7 +197,7 @@ class _TaskListScreenState extends State<TaskListScreen> {
   Widget _buildOfflineBanner() {
     return Container(
       width: double.infinity,
-      color: AppColors.warning.withOpacity(0.15),
+      color: AppColors.warning.withValues(alpha: 0.15),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: const Row(
         children: [
@@ -167,7 +206,11 @@ class _TaskListScreenState extends State<TaskListScreen> {
           Expanded(
             child: Text(
               'Offline Read-Only Mode: Viewing cached tasks. Editing disabled.',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.warning),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppColors.warning,
+              ),
             ),
           ),
         ],
@@ -177,7 +220,9 @@ class _TaskListScreenState extends State<TaskListScreen> {
 
   void _showOfflineToast() {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Offline mode: connect to internet to edit tasks.')),
+      const SnackBar(
+        content: Text('Offline mode: connect to internet to edit tasks.'),
+      ),
     );
   }
 
@@ -194,19 +239,23 @@ class _TaskListScreenState extends State<TaskListScreen> {
           children: [
             const Padding(
               padding: EdgeInsets.all(16),
-              child: Text('Filter by Category',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              child: Text(
+                'Filter by Category',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
             ),
-            ...categories.map((cat) => ListTile(
-                  title: Text(cat),
-                  trailing: _selectedCategory == cat
-                      ? const Icon(Icons.check, color: AppColors.primary)
-                      : null,
-                  onTap: () {
-                    setState(() => _selectedCategory = cat);
-                    Navigator.pop(context);
-                  },
-                )),
+            ...categories.map(
+              (cat) => ListTile(
+                title: Text(cat),
+                trailing: _selectedCategory == cat
+                    ? const Icon(Icons.check, color: AppColors.primary)
+                    : null,
+                onTap: () {
+                  setState(() => _selectedCategory = cat);
+                  Navigator.pop(context);
+                },
+              ),
+            ),
           ],
         ),
       ),
@@ -231,7 +280,9 @@ class _TaskListScreenState extends State<TaskListScreen> {
                   style: TextStyle(
                     color: isSelected ? Colors.white : AppColors.textSecondary,
                     fontSize: 13,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                    fontWeight: isSelected
+                        ? FontWeight.w600
+                        : FontWeight.normal,
                   ),
                 ),
                 selected: isSelected,
@@ -251,13 +302,25 @@ class _TaskListScreenState extends State<TaskListScreen> {
   Widget _buildStatsRow(TaskStore store) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Row(
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
         children: [
-          _StatChip(label: 'Pending', count: store.pendingCount, color: AppColors.warning),
-          const SizedBox(width: 8),
-          _StatChip(label: 'Done', count: store.completedCount, color: AppColors.success),
-          const SizedBox(width: 8),
-          _StatChip(label: 'Overdue', count: store.overdueCount, color: AppColors.error),
+          _StatChip(
+            label: 'Pending',
+            count: store.pendingCount,
+            color: AppColors.warning,
+          ),
+          _StatChip(
+            label: 'Done',
+            count: store.completedCount,
+            color: AppColors.success,
+          ),
+          _StatChip(
+            label: 'Overdue',
+            count: store.overdueCount,
+            color: AppColors.error,
+          ),
         ],
       ),
     );
@@ -269,14 +332,18 @@ class _StatChip extends StatelessWidget {
   final int count;
   final Color color;
 
-  const _StatChip({required this.label, required this.count, required this.color});
+  const _StatChip({
+    required this.label,
+    required this.count,
+    required this.color,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -287,8 +354,14 @@ class _StatChip extends StatelessWidget {
             decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
           const SizedBox(width: 6),
-          Text('$count $label',
-              style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+          Text(
+            '$count $label',
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );
@@ -315,12 +388,14 @@ class _TaskCard extends StatelessWidget {
     final isDoneToday = task.isCompletedOn(DateTime.now());
     return Dismissible(
       key: Key(task.id ?? task.title),
-      direction: offlineMode ? DismissDirection.none : DismissDirection.endToStart,
+      direction: offlineMode
+          ? DismissDirection.none
+          : DismissDirection.endToStart,
       background: Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
         decoration: BoxDecoration(
-          color: AppColors.error.withOpacity(0.1),
+          color: AppColors.error.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(16),
         ),
         child: const Icon(Icons.delete_outline, color: AppColors.error),
@@ -336,7 +411,7 @@ class _TaskCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.04),
+                color: Colors.black.withValues(alpha: 0.04),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -354,7 +429,9 @@ class _TaskCard extends StatelessWidget {
                     shape: BoxShape.circle,
                     color: isDoneToday ? AppColors.primary : Colors.transparent,
                     border: Border.all(
-                      color: isDoneToday ? AppColors.primary : AppColors.textHint,
+                      color: isDoneToday
+                          ? AppColors.primary
+                          : AppColors.textHint,
                       width: 2,
                     ),
                   ),
@@ -373,8 +450,12 @@ class _TaskCard extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
-                        color: isDoneToday ? AppColors.textHint : AppColors.textPrimary,
-                        decoration: isDoneToday ? TextDecoration.lineThrough : null,
+                        color: isDoneToday
+                            ? AppColors.textHint
+                            : AppColors.textPrimary,
+                        decoration: isDoneToday
+                            ? TextDecoration.lineThrough
+                            : null,
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -383,22 +464,36 @@ class _TaskCard extends StatelessWidget {
                         PriorityBadge(priority: task.priority),
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: AppColors.primaryLight,
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: Text(task.category,
-                              style: const TextStyle(fontSize: 11, color: AppColors.primary)),
+                          child: Text(
+                            task.category,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppColors.primary,
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 8),
-                        const Icon(Icons.access_time, size: 12, color: AppColors.textHint),
+                        const Icon(
+                          Icons.access_time,
+                          size: 12,
+                          color: AppColors.textHint,
+                        ),
                         const SizedBox(width: 2),
                         Text(
                           _formatDate(task.dueDate),
                           style: TextStyle(
                             fontSize: 11,
-                            color: _isOverdue(task) ? AppColors.error : AppColors.textHint,
+                            color: _isOverdue(task)
+                                ? AppColors.error
+                                : AppColors.textHint,
                           ),
                         ),
                       ],
@@ -416,16 +511,26 @@ class _TaskCard extends StatelessWidget {
 
   bool _isOverdue(Task task) {
     if (task.isCompletedOn(DateTime.now())) return false;
-    final today = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
-    final dueDay = DateTime(task.dueDate.year, task.dueDate.month, task.dueDate.day);
+    final today = DateTime(
+      DateTime.now().year,
+      DateTime.now().month,
+      DateTime.now().day,
+    );
+    final dueDay = DateTime(
+      task.dueDate.year,
+      task.dueDate.month,
+      task.dueDate.day,
+    );
     return dueDay.isBefore(today);
   }
 
   String _formatDate(DateTime date) {
     final now = DateTime.now();
-    final diff = DateTime(date.year, date.month, date.day)
-        .difference(DateTime(now.year, now.month, now.day))
-        .inDays;
+    final diff = DateTime(
+      date.year,
+      date.month,
+      date.day,
+    ).difference(DateTime(now.year, now.month, now.day)).inDays;
     if (diff == 0) return 'Today';
     if (diff == 1) return 'Tomorrow';
     if (diff == -1) return 'Yesterday';

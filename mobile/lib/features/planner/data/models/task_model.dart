@@ -24,19 +24,25 @@ class Task {
   final String? description;
   final String category;
   final String priority; // 'high', 'medium', 'low'
-  final DateTime dueDate; // For deadline: due date only; for routine: start date
+  final DateTime
+  dueDate; // For deadline: due date only; for routine: start date
   final TimeOfDay? startTime; // Routine start time
   final TimeOfDay? endTime; // Routine end time
   final String? repeatRule; // 'never', 'daily', 'weekdays' (weekly)
   final List<int> weekdays; // Monday = 1 .. Sunday = 7
   final bool isCompleted; // For deadlines & non-repeating routines
-  final Set<String> completedDates; // YYYY-MM-DD keys for repeating routine occurrences
+  final Set<String>
+  completedDates; // YYYY-MM-DD keys for repeating routine occurrences
   final bool reminderEnabled;
   final int? reminderMinutes; // null (Off), 15, or 30
+  final String? facilityId;
   final String? locationName;
   final double? latitude;
   final double? longitude;
   final String? photoPath;
+  final String? photoId;
+  final DateTime? dueAt;
+  final String? repeatUntil;
   final bool isSynced;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -57,15 +63,19 @@ class Task {
     this.completedDates = const {},
     this.reminderEnabled = false,
     this.reminderMinutes,
+    this.facilityId,
     this.locationName,
     this.latitude,
     this.longitude,
     this.photoPath,
+    this.photoId,
+    this.dueAt,
+    this.repeatUntil,
     this.isSynced = false,
     DateTime? createdAt,
     DateTime? updatedAt,
-  })  : createdAt = createdAt ?? DateTime.now(),
-        updatedAt = updatedAt ?? DateTime.now();
+  }) : createdAt = createdAt ?? DateTime.now(),
+       updatedAt = updatedAt ?? DateTime.now();
 
   bool get isRoutine => type == 'routine';
   bool get isDeadline => type == 'deadline';
@@ -140,12 +150,20 @@ class Task {
       weekdays: weekdays ?? this.weekdays,
       isCompleted: isCompleted ?? this.isCompleted,
       completedDates: completedDates ?? this.completedDates,
-      reminderEnabled: clearReminder ? false : (reminderEnabled ?? this.reminderEnabled),
-      reminderMinutes: clearReminder ? null : (reminderMinutes ?? this.reminderMinutes),
+      reminderEnabled: clearReminder
+          ? false
+          : (reminderEnabled ?? this.reminderEnabled),
+      reminderMinutes: clearReminder
+          ? null
+          : (reminderMinutes ?? this.reminderMinutes),
+      facilityId: facilityId,
       locationName: locationName ?? this.locationName,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       photoPath: photoPath ?? this.photoPath,
+      photoId: photoId,
+      dueAt: dueAt,
+      repeatUntil: repeatUntil,
       isSynced: isSynced ?? this.isSynced,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
@@ -162,6 +180,8 @@ class Task {
     }
 
     if (targetDay.isBefore(baseDay)) return false;
+    final until = DateTime.tryParse(repeatUntil ?? '');
+    if (until != null && targetDay.isAfter(until)) return false;
 
     switch (repeatRule) {
       case 'daily':

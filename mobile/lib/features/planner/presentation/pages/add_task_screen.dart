@@ -1,14 +1,27 @@
 import 'dart:io';
-import 'package:flutter/material.dart';
+
+import 'package:material_ui/material_ui.dart';
+import 'package:flutter/services.dart';
+import 'package:timezone/timezone.dart' as tz;
 import 'package:image_picker/image_picker.dart';
+
 import '../../../../app/app_theme.dart';
+import '../../../../core/services/task_photo_picker.dart';
+import '../../../../core/widgets/planner_primary_button.dart';
+import '../../../locations/data/repositories/campus_facilities.dart';
+import '../../data/repositories/entry_attachments_api.dart';
+import '../../data/repositories/task_store.dart';
+import '../widgets/task_photo_preview.dart';
+import '../widgets/task_schedule_sheet.dart';
 import '../../data/models/task_model.dart' as model;
 import '../../../locations/data/models/selected_facility.dart';
 import '../../../locations/presentation/pages/location_picker_page.dart';
 
 class AddTaskScreen extends StatefulWidget {
   final model.Task? task; // null = add, non-null with id = edit
-  const AddTaskScreen({super.key, this.task});
+  const AddTaskScreen({super.key, this.task, this.store});
+
+  final TaskStore? store;
 
   @override
   State<AddTaskScreen> createState() => _AddTaskScreenState();
@@ -34,12 +47,24 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
   // Reminder options: null (Off), 15, or 30
   int? _reminderMinutes;
 
+  String? _facilityId;
   String? _locationName;
   double? _latitude;
   double? _longitude;
   String? _photoPath;
+  TimeOfDay? _dueTime;
+  bool _pickingPhoto = false;
+  bool _pickingLocation = false;
+  bool _saving = false;
+  bool _removeRemotePhoto = false;
+  TaskStore get _store => widget.store ?? TaskStore.instance;
 
-  final List<String> _categories = ['Study', 'Assignment', 'Health', 'Personal'];
+  final List<String> _categories = [
+    'Study',
+    'Assignment',
+    'Health',
+    'Personal',
+  ];
 
   bool get isEditing => widget.task != null && widget.task!.id != null;
 
@@ -47,7 +72,9 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
   void initState() {
     super.initState();
     _titleController = TextEditingController(text: widget.task?.title ?? '');
-    _descriptionController = TextEditingController(text: widget.task?.description ?? '');
+    _descriptionController = TextEditingController(
+      text: widget.task?.description ?? '',
+    );
 
     final existing = widget.task;
     if (existing != null) {
@@ -84,10 +111,17 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
 
       _reminderMinutes =
           existing.reminderMinutes ?? (existing.reminderEnabled ? 15 : null);
+      final dueAt = existing.dueAt;
+      if (dueAt != null) {
+        _dueTime = TimeOfDay.fromDateTime(
+          tz.TZDateTime.from(dueAt, tz.getLocation('Asia/Kuala_Lumpur')),
+        );
+      }
+      _facilityId = existing.facilityId;
       _locationName = existing.locationName;
       _latitude = existing.latitude;
       _longitude = existing.longitude;
-      _photoPath = existing.photoPath;
+      _photoPath = _store.api == null ? existing.photoPath : null;
     } else {
       _selectedWeekdays = {_selectedDate.weekday};
     }
@@ -111,117 +145,143 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
           icon: const Icon(Icons.arrow_back_ios),
           onPressed: () => Navigator.pop(context),
         ),
-        actions: [
-          if (isEditing)
-            IconButton(
-              icon: const Icon(Icons.delete_outline, color: AppColors.error),
-              onPressed: _confirmDelete,
-            ),
-        ],
       ),
-      body: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildEntryTypeSwitcher(),
-              const SizedBox(height: 20),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+          child: PlannerPrimaryButton(
+            onPressed: _pickingPhoto || _pickingLocation || _saving
+                ? null
+                : _saveTask,
+            label: _saving
+                ? 'Saving…'
+                : isEditing
+                ? 'Update Task'
+                : (_entryType == 'routine'
+                      ? 'Save Routine Activity'
+                      : 'Save Deadline Task'),
+          ),
+        ),
+      ),
+      body: PopScope(
+        canPop: !_saving,
+        child: AbsorbPointer(
+          absorbing: _saving,
+          child: Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildEntryTypeSwitcher(),
+                  const SizedBox(height: 20),
 
-              _buildSectionLabel(_entryType == 'routine' ? 'ROUTINE TITLE' : 'TASK TITLE'),
-              TextFormField(
-                controller: _titleController,
-                decoration: InputDecoration(
-                  hintText: _entryType == 'routine'
-                      ? 'e.g. Monday study'
-                      : 'e.g. Submit report',
-                  prefixIcon: const Icon(Icons.task_alt_outlined, color: AppColors.textHint),
-                ),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Title is required' : null,
-              ),
-              const SizedBox(height: 18),
-
-              _buildSectionLabel('DESCRIPTION'),
-              TextFormField(
-                controller: _descriptionController,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  hintText: 'Add notes or details about this task...',
-                  alignLabelWithHint: true,
-                ),
-              ),
-              const SizedBox(height: 18),
-
-              _buildSectionLabel('CATEGORY'),
-              _buildCategorySelector(),
-              const SizedBox(height: 18),
-
-              _buildSectionLabel('PRIORITY LEVEL'),
-              _buildPrioritySelector(),
-              const SizedBox(height: 18),
-
-              if (_entryType == 'routine') ...[
-                _buildSectionLabel('TIME'),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildTimeBox(
-                        label: 'Start Time',
-                        time: _startTime,
-                        onTap: () => _pickCustomTime(isStart: true),
+                  _buildSectionLabel(
+                    _entryType == 'routine' ? 'ROUTINE TITLE' : 'TASK TITLE',
+                  ),
+                  TextFormField(
+                    controller: _titleController,
+                    maxLength: 100,
+                    decoration: InputDecoration(
+                      hintText: _entryType == 'routine'
+                          ? 'e.g. Monday study'
+                          : 'e.g. Submit report',
+                      prefixIcon: const Icon(
+                        Icons.task_alt_outlined,
+                        color: AppColors.textHint,
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildTimeBox(
-                        label: 'End Time',
-                        time: _endTime,
-                        onTap: () => _pickCustomTime(isStart: false),
-                      ),
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'Title is required'
+                        : null,
+                  ),
+                  const SizedBox(height: 18),
+
+                  _buildSectionLabel('DESCRIPTION'),
+                  TextFormField(
+                    controller: _descriptionController,
+                    maxLines: 3,
+                    maxLength: 2000,
+                    decoration: const InputDecoration(
+                      hintText: 'Add notes or details about this task...',
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+
+                  _buildSectionLabel('CATEGORY'),
+                  _buildCategorySelector(),
+                  const SizedBox(height: 18),
+
+                  _buildSectionLabel('PRIORITY LEVEL'),
+                  _buildPrioritySelector(),
+                  const SizedBox(height: 18),
+
+                  if (_entryType == 'routine') ...[
+                    _buildSectionLabel('TIME'),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildTimeBox(
+                            label: 'Start Time',
+                            time: _startTime,
+                            onTap: () => _pickCustomTime(isStart: true),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _buildTimeBox(
+                            label: 'End Time',
+                            time: _endTime,
+                            onTap: () => _pickCustomTime(isStart: false),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    _buildSectionLabel('REPEAT'),
+                    _buildRepeatSelector(),
+                    if (_repeatRule == 'weekdays') ...[
+                      const SizedBox(height: 14),
+                      _buildSectionLabel('REPEAT DAYS'),
+                      _buildWeekdaySelector(),
+                    ],
+                    const SizedBox(height: 14),
+                    _buildSectionLabel(
+                      _repeatRule == 'never' ? 'DATE' : 'STARTS FROM',
+                    ),
+                    _buildDatePicker(),
+                  ] else ...[
+                    _buildSectionLabel('DUE DATE & TIME'),
+                    Row(
+                      children: [
+                        Expanded(child: _buildDatePicker()),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _buildTimeBox(
+                            label: 'Due Time',
+                            time: _dueTime,
+                            onTap: _pickDueTime,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
-                ),
-                const SizedBox(height: 18),
-                _buildSectionLabel('REPEAT'),
-                _buildRepeatSelector(),
-                if (_repeatRule == 'weekdays') ...[
-                  const SizedBox(height: 14),
-                  _buildSectionLabel('REPEAT DAYS'),
-                  _buildWeekdaySelector(),
+                  const SizedBox(height: 18),
+
+                  _buildLocationPicker(),
+                  const SizedBox(height: 12),
+                  _buildReminderSelector(),
+                  const SizedBox(height: 12),
+                  _buildPhotoPicker(),
+                  const SizedBox(height: 28),
+
+                  const SizedBox(height: 16),
                 ],
-                const SizedBox(height: 14),
-                _buildSectionLabel(_repeatRule == 'never' ? 'DATE' : 'STARTS FROM'),
-                _buildDatePicker(),
-              ] else ...[
-                _buildSectionLabel('DUE DATE'),
-                _buildDatePicker(),
-              ],
-              const SizedBox(height: 18),
-
-              _buildSectionLabel('REMINDER'),
-              _buildReminderSelector(),
-              const SizedBox(height: 18),
-
-              _buildLocationPicker(),
-              const SizedBox(height: 12),
-
-              _buildPhotoPicker(),
-              const SizedBox(height: 28),
-
-              ElevatedButton.icon(
-                onPressed: _saveTask,
-                icon: const Icon(Icons.save_outlined),
-                label: Text(
-                  isEditing
-                      ? 'Update Task'
-                      : (_entryType == 'routine'
-                          ? 'Save Routine Activity'
-                          : 'Save Deadline Task'),
-                ),
               ),
-              const SizedBox(height: 16),
-            ],
+            ),
           ),
         ),
       ),
@@ -240,12 +300,16 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
         children: [
           Expanded(
             child: GestureDetector(
-              onTap: isEditing ? null : () => setState(() => _entryType = 'routine'),
+              onTap: isEditing
+                  ? null
+                  : () => setState(() => _entryType = 'routine'),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
-                  color: _entryType == 'routine' ? AppColors.primary : Colors.transparent,
+                  color: _entryType == 'routine'
+                      ? AppColors.primary
+                      : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 alignment: Alignment.center,
@@ -254,7 +318,9 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: _entryType == 'routine' ? Colors.white : AppColors.textSecondary,
+                    color: _entryType == 'routine'
+                        ? Colors.white
+                        : AppColors.textSecondary,
                   ),
                 ),
               ),
@@ -262,12 +328,16 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
           ),
           Expanded(
             child: GestureDetector(
-              onTap: isEditing ? null : () => setState(() => _entryType = 'deadline'),
+              onTap: isEditing
+                  ? null
+                  : () => setState(() => _entryType = 'deadline'),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
-                  color: _entryType == 'deadline' ? AppColors.primary : Colors.transparent,
+                  color: _entryType == 'deadline'
+                      ? AppColors.primary
+                      : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 alignment: Alignment.center,
@@ -276,7 +346,9 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: _entryType == 'deadline' ? Colors.white : AppColors.textSecondary,
+                    color: _entryType == 'deadline'
+                        ? Colors.white
+                        : AppColors.textSecondary,
                   ),
                 ),
               ),
@@ -316,7 +388,9 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
               color: isSelected ? AppColors.primary : AppColors.surface,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: isSelected ? AppColors.primary : AppColors.textHint.withOpacity(0.3),
+                color: isSelected
+                    ? AppColors.primary
+                    : AppColors.textHint.withValues(alpha: 0.3),
               ),
             ),
             child: Text(
@@ -353,24 +427,34 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
                 duration: const Duration(milliseconds: 200),
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
-                  color: isSelected ? color.withOpacity(0.15) : AppColors.surface,
+                  color: isSelected
+                      ? color.withValues(alpha: 0.15)
+                      : AppColors.surface,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: isSelected ? color : AppColors.textHint.withOpacity(0.3),
+                    color: isSelected
+                        ? color
+                        : AppColors.textHint.withValues(alpha: 0.3),
                     width: isSelected ? 2 : 1,
                   ),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(icon, size: 14, color: isSelected ? color : AppColors.textHint),
+                    Icon(
+                      icon,
+                      size: 14,
+                      color: isSelected ? color : AppColors.textHint,
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       value[0].toUpperCase() + value.substring(1),
                       style: TextStyle(
                         color: isSelected ? color : AppColors.textHint,
                         fontSize: 13,
-                        fontWeight: isSelected ? FontWeight.w700 : FontWeight.normal,
+                        fontWeight: isSelected
+                            ? FontWeight.w700
+                            : FontWeight.normal,
                       ),
                     ),
                   ],
@@ -384,7 +468,11 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
   }
 
   Widget _buildRepeatSelector() {
-    final options = [('never', 'Never'), ('daily', 'Daily'), ('weekdays', 'Weekly')];
+    final options = [
+      ('never', 'Never'),
+      ('daily', 'Daily'),
+      ('weekdays', 'Weekly'),
+    ];
     return Row(
       children: options.map((opt) {
         final (val, label) = opt;
@@ -397,10 +485,14 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
-                  color: isSelected ? AppColors.primaryLight : AppColors.surface,
+                  color: isSelected
+                      ? AppColors.primaryLight
+                      : AppColors.surface,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: isSelected ? AppColors.primary : const Color(0xFFE5E7EB),
+                    color: isSelected
+                        ? AppColors.primary
+                        : const Color(0xFFE5E7EB),
                     width: isSelected ? 1.5 : 1,
                   ),
                 ),
@@ -409,8 +501,12 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
                   label,
                   style: TextStyle(
                     fontSize: 13,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                    color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                    fontWeight: isSelected
+                        ? FontWeight.w600
+                        : FontWeight.normal,
+                    color: isSelected
+                        ? AppColors.primary
+                        : AppColors.textSecondary,
                   ),
                 ),
               ),
@@ -448,7 +544,9 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
                   color: isSelected ? AppColors.primary : AppColors.surface,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                    color: isSelected ? AppColors.primary : const Color(0xFFE5E7EB),
+                    color: isSelected
+                        ? AppColors.primary
+                        : const Color(0xFFE5E7EB),
                   ),
                 ),
                 alignment: Alignment.center,
@@ -480,11 +578,22 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
         ),
         child: Row(
           children: [
-            const Icon(Icons.calendar_today_outlined, size: 16, color: AppColors.primary),
+            const Icon(
+              Icons.calendar_today_outlined,
+              size: 16,
+              color: AppColors.primary,
+            ),
             const SizedBox(width: 8),
-            Text(
-              '${_selectedDate.day} ${_monthName(_selectedDate.month)} ${_selectedDate.year}',
-              style: const TextStyle(fontSize: 13, color: AppColors.textPrimary),
+            Flexible(
+              child: Text(
+                '${_selectedDate.day} ${_monthName(_selectedDate.month)} ${_selectedDate.year}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AppColors.textPrimary,
+                ),
+              ),
             ),
           ],
         ),
@@ -494,7 +603,7 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
 
   Widget _buildTimeBox({
     required String label,
-    required TimeOfDay time,
+    required TimeOfDay? time,
     required VoidCallback onTap,
   }) {
     return GestureDetector(
@@ -509,14 +618,33 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 11,
+                color: AppColors.textSecondary,
+              ),
+            ),
             const SizedBox(height: 4),
             Row(
               children: [
-                const Icon(Icons.access_time, size: 15, color: AppColors.primary),
+                const Icon(
+                  Icons.access_time,
+                  size: 15,
+                  color: AppColors.primary,
+                ),
                 const SizedBox(width: 6),
-                Text(time.format(context),
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                Flexible(
+                  child: Text(
+                    time?.format(context) ?? 'Select time',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               ],
             ),
           ],
@@ -526,46 +654,47 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
   }
 
   Widget _buildReminderSelector() {
-    final options = <(int?, String)>[(null, 'Off'), (15, '15 min'), (30, '30 min')];
-    return Row(
-      children: options.map((opt) {
-        final (val, label) = opt;
-        final isSelected = _reminderMinutes == val;
-        return Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: GestureDetector(
-              onTap: () => setState(() => _reminderMinutes = val),
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: isSelected ? AppColors.primaryLight : AppColors.surface,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isSelected ? AppColors.primary : const Color(0xFFE5E7EB),
-                    width: isSelected ? 1.5 : 1,
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                    color: isSelected ? AppColors.primary : AppColors.textSecondary,
-                  ),
-                ),
-              ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.notifications_active_outlined,
+            color: AppColors.primary,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: DropdownButton<int>(
+              isExpanded: true,
+              value: _reminderMinutes ?? 0,
+              underline: const SizedBox.shrink(),
+              items: const [
+                DropdownMenuItem(value: 0, child: Text('Reminder off')),
+                DropdownMenuItem(value: 15, child: Text('15 min before')),
+                DropdownMenuItem(value: 30, child: Text('30 min before')),
+              ],
+              onChanged: (value) {
+                setState(() => _reminderMinutes = value == 0 ? null : value);
+              },
             ),
           ),
-        );
-      }).toList(),
+          Switch(
+            value: _reminderMinutes != null,
+            onChanged: (enabled) =>
+                setState(() => _reminderMinutes = enabled ? 15 : null),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildLocationPicker() {
     return GestureDetector(
-      onTap: _pickLocation,
+      onTap: _pickingLocation ? null : _pickLocation,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
@@ -575,14 +704,22 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
         ),
         child: Row(
           children: [
-            const Icon(Icons.location_on_outlined, color: AppColors.primary, size: 20),
+            const Icon(
+              Icons.location_on_outlined,
+              color: AppColors.primary,
+              size: 20,
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                _locationName ?? 'Attach Location',
+                _pickingLocation
+                    ? 'Loading locations…'
+                    : _locationName ?? 'Attach Location',
                 style: TextStyle(
                   fontSize: 14,
-                  color: _locationName != null ? AppColors.textPrimary : AppColors.textHint,
+                  color: _locationName != null
+                      ? AppColors.textPrimary
+                      : AppColors.textHint,
                 ),
               ),
             ),
@@ -592,6 +729,7 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(),
                 onPressed: () => setState(() {
+                  _facilityId = null;
                   _locationName = null;
                   _latitude = null;
                   _longitude = null;
@@ -600,7 +738,10 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
             else
               Text(
                 'Optional',
-                style: TextStyle(fontSize: 12, color: AppColors.textHint.withOpacity(0.7)),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textHint.withValues(alpha: 0.7),
+                ),
               ),
           ],
         ),
@@ -610,7 +751,7 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
 
   Widget _buildPhotoPicker() {
     return GestureDetector(
-      onTap: _pickPhoto,
+      onTap: _pickingPhoto ? null : _pickPhoto,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
@@ -618,32 +759,69 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: const Color(0xFFE5E7EB)),
         ),
-        child: _photoPath != null
+        child:
+            _photoPath != null ||
+                (_store.api != null &&
+                    widget.task?.photoId != null &&
+                    !_removeRemotePhoto)
             ? Row(
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: Image.file(File(_photoPath!), width: 48, height: 48, fit: BoxFit.cover),
+                    child: _photoPath == null
+                        ? TaskPhotoPreview(
+                            key: ValueKey(widget.task!.photoId),
+                            photoId: widget.task!.photoId!,
+                            api: _store.api!.attachments,
+                            width: 48,
+                            height: 48,
+                          )
+                        : Image.file(
+                            File(_photoPath!),
+                            width: 48,
+                            height: 48,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) =>
+                                const Icon(Icons.broken_image_outlined),
+                          ),
                   ),
                   const SizedBox(width: 12),
-                  const Expanded(child: Text('Photo attached', style: TextStyle(fontSize: 14))),
+                  const Expanded(
+                    child: Text(
+                      'Photo attached',
+                      style: TextStyle(fontSize: 14),
+                    ),
+                  ),
                   IconButton(
                     icon: const Icon(Icons.close, size: 18),
-                    onPressed: () => setState(() => _photoPath = null),
+                    tooltip: 'Remove photo',
+                    onPressed: () => setState(() {
+                      _photoPath = null;
+                      _removeRemotePhoto = true;
+                    }),
                   ),
                 ],
               )
             : Row(
                 children: [
-                  const Icon(Icons.photo_camera_outlined, color: AppColors.primary, size: 20),
+                  const Icon(
+                    Icons.photo_camera_outlined,
+                    color: AppColors.primary,
+                    size: 20,
+                  ),
                   const SizedBox(width: 12),
                   const Expanded(
-                    child: Text('Attach Photo / Note',
-                        style: TextStyle(fontSize: 14, color: AppColors.textHint)),
+                    child: Text(
+                      'Attach Photo',
+                      style: TextStyle(fontSize: 14, color: AppColors.textHint),
+                    ),
                   ),
                   Text(
                     'Optional',
-                    style: TextStyle(fontSize: 12, color: AppColors.textHint.withOpacity(0.7)),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textHint.withValues(alpha: 0.7),
+                    ),
                   ),
                 ],
               ),
@@ -652,180 +830,255 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
   }
 
   Future<void> _pickDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _selectedDate,
-      firstDate: DateTime.now().subtract(const Duration(days: 365)),
-      lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
-      builder: (context, child) => Theme(
-        data: Theme.of(context).copyWith(
-          colorScheme: const ColorScheme.light(primary: AppColors.primary),
-        ),
-        child: child!,
-      ),
-    );
-    if (picked != null) setState(() => _selectedDate = picked);
+    final picked = await pickTaskDate(context, _selectedDate);
+    if (mounted && picked != null) setState(() => _selectedDate = picked);
   }
 
   Future<void> _pickCustomTime({required bool isStart}) async {
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: isStart ? _startTime : _endTime,
-      builder: (context, child) => Theme(
-        data: Theme.of(context).copyWith(
-          colorScheme: const ColorScheme.light(primary: AppColors.primary),
-        ),
-        child: child!,
-      ),
-    );
-    if (picked != null) {
-      setState(() {
-        if (isStart) {
-          _startTime = picked;
-        } else {
-          _endTime = picked;
-        }
-      });
-    }
+    final picked = await pickTaskTime(context, isStart ? _startTime : _endTime);
+    if (!mounted || picked == null) return;
+    setState(() {
+      if (isStart) {
+        _startTime = picked;
+      } else {
+        _endTime = picked;
+      }
+    });
   }
 
-  // Sample campus facilities used while the app runs with demo data.
-  static const _sampleFacilities = [
-    SelectedFacility(id: 'library', name: 'Library'),
-    SelectedFacility(id: 'cafeteria', name: 'Cafeteria'),
-    SelectedFacility(id: 'lecture_hall', name: 'Lecture Hall'),
-    SelectedFacility(id: 'lab', name: 'Computer Lab'),
-    SelectedFacility(id: 'gym', name: 'Gymnasium'),
-  ];
+  Future<void> _pickDueTime() async {
+    final picked = await pickTaskTime(
+      context,
+      _dueTime ?? const TimeOfDay(hour: 15, minute: 0),
+    );
+    if (mounted && picked != null) setState(() => _dueTime = picked);
+  }
 
   Future<void> _pickLocation() async {
+    final api = _store.api?.attachments;
+    final origin = _store.campusSearchOrigin;
+    var facilities = sampleCampusFacilities;
+    final distances = <String, double>{};
+    if (api != null) {
+      if (origin == null) {
+        _showMessage('Campus location search is unavailable.');
+        return;
+      }
+      setState(() => _pickingLocation = true);
+      try {
+        final nearby = await api.nearby(
+          latitude: origin.latitude,
+          longitude: origin.longitude,
+        );
+        facilities = [for (final result in nearby) result.facility];
+        for (final result in nearby) {
+          distances[result.facility.id] = result.distanceMeters;
+        }
+      } on EntryAttachmentException catch (error) {
+        if (mounted) _showMessage(error.message);
+        return;
+      } catch (_) {
+        if (mounted) _showMessage('Could not load locations. Try again.');
+        return;
+      } finally {
+        if (mounted) setState(() => _pickingLocation = false);
+      }
+    }
+
+    if (!mounted) return;
     final result = await Navigator.push<SelectedFacility>(
       context,
       MaterialPageRoute(
-        builder: (_) => const LocationPickerPage(
-          facilities: _sampleFacilities,
+        builder: (_) => LocationPickerPage(
+          facilities: facilities,
+          distancesInMeters: distances,
+          initialFacilityId: _facilityId,
+          sampleData: api == null,
         ),
       ),
     );
-    if (result != null) {
-      setState(() {
-        _locationName = result.name;
-      });
-    }
+    if (!mounted || result == null) return;
+    setState(() {
+      _facilityId = result.id;
+      _locationName = result.name;
+      _latitude = result.latitude;
+      _longitude = result.longitude;
+    });
   }
 
   Future<void> _pickPhoto() async {
-    final picker = ImagePicker();
-    showModalBottomSheet(
+    final source = await showModalBottomSheet<ImageSource>(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => SafeArea(
+      builder: (sheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
               leading: const Icon(Icons.camera_alt, color: AppColors.primary),
               title: const Text('Take Photo'),
-              onTap: () async {
-                Navigator.pop(context);
-                final img = await picker.pickImage(source: ImageSource.camera);
-                if (img != null) setState(() => _photoPath = img.path);
-              },
+              onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: AppColors.primary),
+              leading: const Icon(
+                Icons.photo_library,
+                color: AppColors.primary,
+              ),
               title: const Text('Choose from Gallery'),
-              onTap: () async {
-                Navigator.pop(context);
-                final img = await picker.pickImage(source: ImageSource.gallery);
-                if (img != null) setState(() => _photoPath = img.path);
-              },
+              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
             ),
           ],
         ),
       ),
     );
-  }
-
-  void _confirmDelete() {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Delete Task'),
-        content: const Text('Are you sure you want to delete this task?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.pop(context);
-            },
-            child: const Text('Delete', style: TextStyle(color: AppColors.error)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _saveTask() {
-    if (_formKey.currentState!.validate()) {
-      final dateOnly = DateTime(
-        _selectedDate.year,
-        _selectedDate.month,
-        _selectedDate.day,
-      );
-
-      final isRoutine = _entryType == 'routine';
-      if (isRoutine) {
-        final startMins = _startTime.hour * 60 + _startTime.minute;
-        final endMins = _endTime.hour * 60 + _endTime.minute;
-        if (endMins <= startMins) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('End time must be after start time.')),
-          );
-          return;
-        }
+    if (!mounted || source == null || _pickingPhoto) return;
+    setState(() => _pickingPhoto = true);
+    try {
+      final photo = await ImagePicker().pickImage(source: source);
+      if (photo == null) return;
+      await taskPhotoMimeType(photo);
+      if (mounted) setState(() => _photoPath = photo.path);
+    } on TaskPhotoException catch (error) {
+      if (mounted) _showMessage(error.message);
+    } on PlatformException {
+      if (mounted) {
+        _showMessage(
+          'Camera or gallery unavailable. Check permissions and try again.',
+        );
       }
+    } on FileSystemException {
+      if (mounted) {
+        _showMessage('Could not read this photo. Choose another one.');
+      }
+    } finally {
+      if (mounted) setState(() => _pickingPhoto = false);
+    }
+  }
 
-      final sortedWeekdays = _selectedWeekdays.toList()..sort();
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
 
-      final task = model.Task(
-        id: widget.task?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
-        type: _entryType,
-        title: _titleController.text.trim(),
-        description: _descriptionController.text.trim(),
-        category: _selectedCategory,
-        priority: _selectedPriority,
-        dueDate: dateOnly,
-        startTime: isRoutine
-            ? model.TimeOfDay(hour: _startTime.hour, minute: _startTime.minute)
-            : null,
-        endTime: isRoutine
-            ? model.TimeOfDay(hour: _endTime.hour, minute: _endTime.minute)
-            : null,
-        repeatRule: isRoutine ? _repeatRule : null,
-        weekdays: isRoutine && _repeatRule == 'weekdays' ? sortedWeekdays : const [],
-        isCompleted: widget.task?.isCompleted ?? false,
-        completedDates: widget.task?.completedDates ?? const {},
-        reminderEnabled: _reminderMinutes != null,
-        reminderMinutes: _reminderMinutes,
-        locationName: _locationName,
-        latitude: _latitude,
-        longitude: _longitude,
-        photoPath: _photoPath,
-        isSynced: false,
-      );
+  Future<void> _saveTask() async {
+    if (_saving || !_formKey.currentState!.validate()) return;
+    final isRoutine = _entryType == 'routine';
+    final date = _selectedDate;
+    final dueTime = _dueTime;
+    if (isRoutine &&
+        (_startTime.hour * 60 + _startTime.minute >=
+            _endTime.hour * 60 + _endTime.minute)) {
+      _showMessage('End time must be after start time.');
+      return;
+    }
+    if (isRoutine && _repeatRule == 'weekdays' && _selectedWeekdays.isEmpty) {
+      _showMessage('Select at least one weekday.');
+      return;
+    }
+    if (!isRoutine && _reminderMinutes != null && dueTime == null) {
+      _showMessage('Choose a due time to turn on the reminder.');
+      return;
+    }
+    final zone = tz.getLocation('Asia/Kuala_Lumpur');
+    final dueAt = isRoutine || dueTime == null
+        ? null
+        : tz.TZDateTime(
+            zone,
+            date.year,
+            date.month,
+            date.day,
+            dueTime.hour,
+            dueTime.minute,
+          );
+    final api = _store.api?.attachments;
+    model.Task buildDraft(String? photoId) => model.Task(
+      id:
+          widget.task?.id ??
+          (api == null
+              ? DateTime.now().microsecondsSinceEpoch.toString()
+              : null),
+      type: _entryType,
+      title: _titleController.text.trim(),
+      description: _descriptionController.text.trim(),
+      category: _selectedCategory,
+      priority: _selectedPriority,
+      dueDate: DateTime(date.year, date.month, date.day),
+      dueAt: dueAt,
+      startTime: isRoutine
+          ? model.TimeOfDay(hour: _startTime.hour, minute: _startTime.minute)
+          : null,
+      endTime: isRoutine
+          ? model.TimeOfDay(hour: _endTime.hour, minute: _endTime.minute)
+          : null,
+      repeatRule: isRoutine ? _repeatRule : null,
+      repeatUntil: isRoutine && _repeatRule != 'never'
+          ? widget.task?.repeatUntil
+          : null,
+      weekdays: isRoutine && _repeatRule == 'weekdays'
+          ? (_selectedWeekdays.toList()..sort())
+          : const [],
+      isCompleted: widget.task?.isCompleted ?? false,
+      completedDates: widget.task?.completedDates ?? const {},
+      reminderEnabled: _reminderMinutes != null,
+      reminderMinutes: _reminderMinutes,
+      facilityId: _facilityId,
+      locationName: _locationName,
+      latitude: _latitude,
+      longitude: _longitude,
+      photoPath: api == null ? _photoPath : null,
+      photoId: photoId,
+      createdAt: widget.task?.createdAt,
+    );
 
-      Navigator.pop(context, task);
+    setState(() => _saving = true);
+    try {
+      final model.Task saved;
+      String? photoWarning;
+      if (api == null) {
+        saved = await _store.persistTask(buildDraft(null));
+      } else {
+        final path = _photoPath;
+        final result = await api.savePhotoChange(
+          previousPhotoId: widget.task?.photoId,
+          newPhoto: path == null ? null : XFile(path),
+          removePhoto: _removeRemotePhoto,
+          persist: (photoId) => _store.persistTask(buildDraft(photoId)),
+        );
+        saved = result.value;
+        photoWarning = result.warning;
+      }
+      final warning = await _store.acceptSavedTask(saved);
+      if (!mounted) return;
+      if (photoWarning != null) _showMessage(photoWarning);
+      if (warning != null) _showMessage(warning);
+      Navigator.pop(context);
+    } on EntryAttachmentException catch (error) {
+      if (mounted) _showMessage(error.message);
+    } catch (_) {
+      if (mounted) {
+        _showMessage(
+          'Could not save the task. Check your connection and try again.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 
   String _monthName(int month) {
     const months = [
-      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      '',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return months[month];
   }

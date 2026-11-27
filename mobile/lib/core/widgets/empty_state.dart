@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
+
 import '../../app/app_theme.dart';
 
 class EmptyState extends StatelessWidget {
@@ -31,22 +32,29 @@ class EmptyState extends StatelessWidget {
                 color: AppColors.primaryLight,
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, size: 48, color: AppColors.primary.withOpacity(0.6)),
+              child: Icon(
+                icon,
+                size: 48,
+                color: AppColors.primary.withValues(alpha: 0.6),
+              ),
             ),
             const SizedBox(height: 20),
-            Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 8),
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: AppColors.textSecondary, fontSize: 14),
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 14,
+              ),
             ),
             if (buttonLabel != null) ...[
               const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: onButtonTap,
-                child: Text(buttonLabel!),
-              ),
+              ElevatedButton(onPressed: onButtonTap, child: Text(buttonLabel!)),
             ],
           ],
         ),

@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
+
 import '../../app/app_theme.dart';
 
 class PriorityBadge extends StatelessWidget {
@@ -22,7 +23,7 @@ class PriorityBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
@@ -32,7 +33,11 @@ class PriorityBadge extends StatelessWidget {
           const SizedBox(width: 3),
           Text(
             priority[0].toUpperCase() + priority.substring(1),
-            style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600),
+            style: TextStyle(
+              fontSize: 11,
+              color: color,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
