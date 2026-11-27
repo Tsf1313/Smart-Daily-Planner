@@ -207,6 +207,11 @@ test("editing a weekly routine removes obsolete future dates and preserves compl
   await request(base, "PUT", `/api/v1/routine-occurrences/${completedMonday.id}/completion`, {
     body: { isCompleted: true },
   });
+  const pastOccurrences = (await request(
+    base,
+    "GET",
+    `/api/v1/routine-occurrences?from=${startDate}&to=${addDays(repeatUntil, 1)}`,
+  )).body.data.items.filter((item) => item.date < today);
 
   const updated = await request(base, "PATCH", `/api/v1/entries/${created.body.data.id}`, {
     body: { weekdays: [3] },
@@ -219,7 +224,15 @@ test("editing a weekly routine removes obsolete future dates and preserves compl
     `/api/v1/routine-occurrences?from=${startDate}&to=${addDays(repeatUntil, 1)}`,
   );
   const occurrences = revisedOccurrences.body.data.items;
+  for (const pastOccurrence of pastOccurrences) {
+    assert.deepEqual(
+      occurrences.find((item) => item.id === pastOccurrence.id),
+      pastOccurrence,
+    );
+  }
   assert.equal(occurrences.find((item) => item.id === completedMonday.id)?.isCompleted, true);
+  assert.equal(occurrences.some((item) => item.date < today &&
+    (new Date(`${item.date}T00:00:00Z`).getUTCDay() + 6) % 7 === 2), false);
   assert.ok(occurrences.some((item) => item.date > today && item.date !== startDate &&
     (new Date(`${item.date}T00:00:00Z`).getUTCDay() + 6) % 7 === 2));
   assert.equal(occurrences.some((item) => item.date > today &&

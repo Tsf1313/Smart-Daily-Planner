@@ -67,10 +67,11 @@ class MemoryStore {
     return { ...entry };
   }
 
-  generateOccurrences(entry) {
+  generateOccurrences(entry, fromDate = entry.startDate) {
     if (entry.kind !== "routine") return [];
-    const from = entry.startDate;
-    const to = entry.repeatUntil || addDays(from, 366);
+    const from = fromDate > entry.startDate ? fromDate : entry.startDate;
+    const today = malaysiaToday();
+    const to = entry.repeatUntil || addDays(entry.startDate, 366);
     const generated = [];
     const dates = [];
     for (let date = from; date <= to; date = addDays(date, 1)) {
@@ -84,7 +85,7 @@ class MemoryStore {
     }
     const scheduledDates = new Set(dates);
     for (const [occurrenceId, occurrence] of this.occurrences) {
-      if (occurrence.entryId === entry.id && occurrence.date >= malaysiaToday() &&
+      if (occurrence.entryId === entry.id && occurrence.date >= today &&
           !occurrence.isCompleted && !scheduledDates.has(occurrence.date)) {
         this.occurrences.delete(occurrenceId);
       }
@@ -166,7 +167,7 @@ class MemoryStore {
     if (fields.location === null) entry.location = null;
     if (fields.photoId === null) entry.photoId = null;
     Object.assign(entry, fields, { updatedAt: new Date().toISOString() });
-    if (entry.kind === "routine") this.generateOccurrences(entry);
+    if (entry.kind === "routine") this.generateOccurrences(entry, malaysiaToday());
     return this.serializeEntry(entry);
   }
 
@@ -193,7 +194,9 @@ class MemoryStore {
     const to = range.to.slice(0, 10);
     const ownedIds = new Set([...this.entries.values()].filter((entry) => entry.ownerId === ownerId).map((entry) => entry.id));
     for (const entry of this.entries.values()) {
-      if (entry.ownerId === ownerId && entry.kind === "routine") this.generateOccurrences(entry);
+      if (entry.ownerId === ownerId && entry.kind === "routine") {
+        this.generateOccurrences(entry, malaysiaToday());
+      }
     }
     return [...this.occurrences.values()].filter((item) =>
       ownedIds.has(item.entryId) && item.date >= from && item.date < to,

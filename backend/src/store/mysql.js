@@ -266,7 +266,7 @@ class MysqlStore {
       );
     }
     const entry = await this.getEntry(ownerId, id);
-    if (entry?.kind === "routine") await this.generateOccurrences(entry);
+    if (entry?.kind === "routine") await this.generateOccurrences(entry, malaysiaToday());
     return entry;
   }
 
@@ -284,15 +284,16 @@ class MysqlStore {
     return entry?.kind === "deadline" ? entry : null;
   }
 
-  async generateOccurrences(entry) {
+  async generateOccurrences(entry, fromDate = entry.startDate) {
     if (entry.kind !== "routine") return;
+    const from = fromDate > entry.startDate ? fromDate : entry.startDate;
     const until = entry.repeatUntil || (() => {
       const date = new Date(`${entry.startDate}T00:00:00.000Z`);
       date.setUTCDate(date.getUTCDate() + 366);
       return date.toISOString().slice(0, 10);
     })();
     const dates = [];
-    for (let date = entry.startDate; date <= until; ) {
+    for (let date = from; date <= until; ) {
       const weekday = (new Date(`${date}T00:00:00.000Z`).getUTCDay() + 6) % 7 + 1;
       const matches = entry.repeat === "none" ? date === entry.startDate
         : entry.repeat === "daily" || (entry.repeat === "weekly" && entry.weekdays.includes(weekday));
@@ -331,7 +332,7 @@ class MysqlStore {
       `SELECT ${entryColumns} FROM entries WHERE owner_id = ? AND kind = 'routine'`,
       [ownerId],
     );
-    for (const row of entries) await this.generateOccurrences(mapEntry(row));
+    for (const row of entries) await this.generateOccurrences(mapEntry(row), malaysiaToday());
     const [rows] = await this.pool.execute(
       `SELECT o.id, o.entry_id AS entryId,
               DATE_FORMAT(o.occurrence_date, '%Y-%m-%d') AS date,

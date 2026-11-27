@@ -113,13 +113,22 @@ test("MySQL routine edits remove obsolete future occurrences and preserve comple
   const completedMonday = before.find((item) => item.date === startDate);
   assert.ok(completedMonday);
   await store.setOccurrenceCompletion(ownerId, completedMonday.id, true);
+  const pastOccurrences = (await store.listOccurrences(ownerId, {
+    from: `${startDate}T00:00:00Z`,
+    to: `${addDays(repeatUntil, 1)}T00:00:00Z`,
+  })).filter((item) => item.date < today);
   await store.updateEntry(ownerId, routine.id, { weekdays: [3] });
   const after = await store.listOccurrences(ownerId, {
     from: `${startDate}T00:00:00Z`,
     to: `${addDays(repeatUntil, 1)}T00:00:00Z`,
   });
 
+  for (const pastOccurrence of pastOccurrences) {
+    assert.deepEqual(after.find((item) => item.id === pastOccurrence.id), pastOccurrence);
+  }
   assert.equal(after.find((item) => item.id === completedMonday.id)?.isCompleted, true);
+  assert.equal(after.some((item) => item.date < today &&
+    (new Date(`${item.date}T00:00:00Z`).getUTCDay() + 6) % 7 === 2), false);
   assert.equal(after.some((item) => item.date > today &&
     (new Date(`${item.date}T00:00:00Z`).getUTCDay() + 6) % 7 === 0), false);
   assert.ok(after.some((item) => item.date > today &&
