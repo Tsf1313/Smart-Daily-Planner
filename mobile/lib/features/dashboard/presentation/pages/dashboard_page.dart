@@ -81,9 +81,13 @@ class _DashboardPageState extends State<DashboardPage> {
     if (loading) return const Center(child: CircularProgressIndicator());
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final upcoming = entries
-        .where((e) => !DateTime.parse(e.dueDate).isBefore(today))
-        .toList();
+    final upcoming = entries.where((entry) {
+      final date = DateTime.tryParse(entry.dueDate);
+      if (date == null) return false;
+
+      final dateOnly = date.toIso8601String().split('T').first;
+      return dateOnly == entry.dueDate && !date.isBefore(today);
+    }).toList();
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [

@@ -20,6 +20,11 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> update({required bool signOut}) async {
+    final displayName = name.text.trim();
+    if (!signOut && displayName.isEmpty) {
+      setState(() => message = 'Enter a display name.');
+      return;
+    }
     setState(() {
       busy = true;
       message = null;
@@ -28,7 +33,7 @@ class _ProfilePageState extends State<ProfilePage> {
       if (signOut) {
         await FirebaseAuth.instance.signOut();
       } else {
-        await widget.user.updateDisplayName(name.text.trim());
+        await widget.user.updateDisplayName(displayName);
         if (mounted) setState(() => message = 'Profile saved.');
       }
     } on FirebaseAuthException catch (e) {

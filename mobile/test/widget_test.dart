@@ -43,6 +43,8 @@ void main() {
           'data': [
             {'id': '1', 'title': 'MAD report', 'dueDate': '2099-01-01'},
             {'id': '2', 'title': 'Old report', 'dueDate': '2001-01-01'},
+            {'id': '3', 'title': 'Broken date', 'dueDate': 'invalid'},
+            {'id': '4', 'title': 'Impossible date', 'dueDate': '2099-02-31'},
           ],
         }),
         status,
@@ -64,6 +66,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('MAD report'), findsOneWidget);
     expect(find.text('Old report'), findsNothing);
+    expect(find.text('Broken date'), findsNothing);
+    expect(find.text('Impossible date'), findsNothing);
     online = false;
     await tester.tap(find.byTooltip('Refresh deadlines'));
     await tester.pumpAndSettle();
