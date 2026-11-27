@@ -1,0 +1,7 @@
+{
+  "FIREBASE_PROJECT_ID": "your-project-id",
+  "FIREBASE_APP_ID": "your-android-app-id",
+  "FIREBASE_API_KEY": "your-android-client-api-key",
+  "FIREBASE_SENDER_ID": "your-project-number",
+  "PLANNER_API_URL": "http://10.0.2.2:3000/api/v1/"
+}
