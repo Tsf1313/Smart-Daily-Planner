@@ -689,17 +689,27 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
     }
   }
 
+  // Sample campus facilities used while the app runs with demo data.
+  static const _sampleFacilities = [
+    SelectedFacility(id: 'library', name: 'Library'),
+    SelectedFacility(id: 'cafeteria', name: 'Cafeteria'),
+    SelectedFacility(id: 'lecture_hall', name: 'Lecture Hall'),
+    SelectedFacility(id: 'lab', name: 'Computer Lab'),
+    SelectedFacility(id: 'gym', name: 'Gymnasium'),
+  ];
+
   Future<void> _pickLocation() async {
     final result = await Navigator.push<SelectedFacility>(
       context,
       MaterialPageRoute(
-        builder: (_) => const LocationPickerPage(),
+        builder: (_) => const LocationPickerPage(
+          facilities: _sampleFacilities,
+        ),
       ),
     );
     if (result != null) {
       setState(() {
         _locationName = result.name;
-        
       });
     }
   }
