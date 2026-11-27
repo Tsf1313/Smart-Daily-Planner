@@ -88,6 +88,10 @@ function dateTime(date, time) {
   return new Date(`${date}T${time}:00+08:00`);
 }
 
+function malaysiaToday() {
+  return new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 class MysqlStore {
   constructor(pool = createPoolFromEnvironment()) {
     this.pool = pool;
@@ -287,15 +291,19 @@ class MysqlStore {
       date.setUTCDate(date.getUTCDate() + 366);
       return date.toISOString().slice(0, 10);
     })();
+    const dates = [];
     for (let date = entry.startDate; date <= until; ) {
       const weekday = (new Date(`${date}T00:00:00.000Z`).getUTCDay() + 6) % 7 + 1;
       const matches = entry.repeat === "none" ? date === entry.startDate
         : entry.repeat === "daily" || (entry.repeat === "weekly" && entry.weekdays.includes(weekday));
       if (matches) {
+        dates.push(date);
         await this.pool.execute(
           `INSERT INTO routine_occurrences (id, entry_id, occurrence_date, start_at, end_at)
            VALUES (?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE start_at = VALUES(start_at), end_at = VALUES(end_at)`,
+           ON DUPLICATE KEY UPDATE
+             start_at = IF(is_completed, start_at, VALUES(start_at)),
+             end_at = IF(is_completed, end_at, VALUES(end_at))`,
           [
             randomUUID(), entry.id, date,
             dateTime(date, entry.startTime), dateTime(date, entry.endTime),
@@ -306,6 +314,16 @@ class MysqlStore {
       next.setUTCDate(next.getUTCDate() + 1);
       date = next.toISOString().slice(0, 10);
     }
+    const staleParams = [entry.id, malaysiaToday()];
+    const staleDates = dates.length
+      ? ` AND occurrence_date NOT IN (${dates.map(() => "?").join(", ")})`
+      : "";
+    staleParams.push(...dates);
+    await this.pool.execute(
+      `DELETE FROM routine_occurrences
+       WHERE entry_id = ? AND occurrence_date >= ? AND is_completed = FALSE${staleDates}`,
+      staleParams,
+    );
   }
 
   async listOccurrences(ownerId, range) {

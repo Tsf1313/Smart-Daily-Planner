@@ -37,6 +37,12 @@ async function request(base, method, route, options = {}) {
   return { response, body: contentType.includes("application/json") ? await response.json() : await response.text() };
 }
 
+function addDays(date, days) {
+  const result = new Date(`${date}T00:00:00Z`);
+  result.setUTCDate(result.getUTCDate() + days);
+  return result.toISOString().slice(0, 10);
+}
+
 test("profile requires Firebase authentication", async (t) => {
   const { base, server } = await startApp();
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -168,6 +174,56 @@ test("generates stable weekly occurrence IDs and completes one occurrence", asyn
   const relisted = await request(base, "GET", "/api/v1/routine-occurrences?from=2026-11-25T00:00:00Z&to=2026-12-02T00:00:00Z");
   const remaining = relisted.body.data.items.find((item) => item.id !== firstId);
   assert.equal(remaining.isCompleted, false);
+});
+
+test("editing a weekly routine removes obsolete future dates and preserves completed history", async (t) => {
+  const { base, server } = await startApp();
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const today = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const todayWeekday = (new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7;
+  const startDate = addDays(today, -(todayWeekday + 7));
+  const repeatUntil = addDays(startDate, 28);
+  const created = await request(base, "POST", "/api/v1/entries", {
+    body: {
+      kind: "routine",
+      title: "Study",
+      startDate,
+      startTime: "20:00",
+      endTime: "21:00",
+      repeat: "weekly",
+      weekdays: [1],
+      repeatUntil,
+    },
+  });
+  assert.equal(created.response.status, 201);
+
+  const oldOccurrences = await request(
+    base,
+    "GET",
+    `/api/v1/routine-occurrences?from=${startDate}&to=${addDays(repeatUntil, 1)}`,
+  );
+  const completedMonday = oldOccurrences.body.data.items.find((item) => item.date === startDate);
+  assert.ok(completedMonday);
+  await request(base, "PUT", `/api/v1/routine-occurrences/${completedMonday.id}/completion`, {
+    body: { isCompleted: true },
+  });
+
+  const updated = await request(base, "PATCH", `/api/v1/entries/${created.body.data.id}`, {
+    body: { weekdays: [3] },
+  });
+  assert.equal(updated.response.status, 200);
+
+  const revisedOccurrences = await request(
+    base,
+    "GET",
+    `/api/v1/routine-occurrences?from=${startDate}&to=${addDays(repeatUntil, 1)}`,
+  );
+  const occurrences = revisedOccurrences.body.data.items;
+  assert.equal(occurrences.find((item) => item.id === completedMonday.id)?.isCompleted, true);
+  assert.ok(occurrences.some((item) => item.date > today && item.date !== startDate &&
+    (new Date(`${item.date}T00:00:00Z`).getUTCDay() + 6) % 7 === 2));
+  assert.equal(occurrences.some((item) => item.date > today &&
+    (new Date(`${item.date}T00:00:00Z`).getUTCDay() + 6) % 7 === 0), false);
 });
 
 test("blocks ordinary users from admin routes", async (t) => {

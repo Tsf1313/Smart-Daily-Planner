@@ -14,6 +14,10 @@ function malaysiaIso(date, time) {
   return new Date(`${date}T${time}:00+08:00`).toISOString();
 }
 
+function malaysiaToday() {
+  return new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 class MemoryStore {
   constructor() {
     this.profiles = new Map();
@@ -68,6 +72,7 @@ class MemoryStore {
     const from = entry.startDate;
     const to = entry.repeatUntil || addDays(from, 366);
     const generated = [];
+    const dates = [];
     for (let date = from; date <= to; date = addDays(date, 1)) {
       const weekday = (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7 + 1;
       const matches =
@@ -75,6 +80,16 @@ class MemoryStore {
         entry.repeat === "daily" ? true :
         entry.repeat === "weekly" ? entry.weekdays.includes(weekday) : false;
       if (!matches) continue;
+      dates.push(date);
+    }
+    const scheduledDates = new Set(dates);
+    for (const [occurrenceId, occurrence] of this.occurrences) {
+      if (occurrence.entryId === entry.id && occurrence.date >= malaysiaToday() &&
+          !occurrence.isCompleted && !scheduledDates.has(occurrence.date)) {
+        this.occurrences.delete(occurrenceId);
+      }
+    }
+    for (const date of dates) {
       const existing = [...this.occurrences.values()].find((item) => item.entryId === entry.id && item.date === date);
       const occurrence = existing || {
         id: randomUUID(),
@@ -84,8 +99,10 @@ class MemoryStore {
         endAt: malaysiaIso(date, entry.endTime),
         isCompleted: false,
       };
-      occurrence.startAt = malaysiaIso(date, entry.startTime);
-      occurrence.endAt = malaysiaIso(date, entry.endTime);
+      if (!occurrence.isCompleted) {
+        occurrence.startAt = malaysiaIso(date, entry.startTime);
+        occurrence.endAt = malaysiaIso(date, entry.endTime);
+      }
       this.occurrences.set(occurrence.id, occurrence);
       generated.push(occurrence);
     }

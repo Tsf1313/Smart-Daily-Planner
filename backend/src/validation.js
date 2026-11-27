@@ -94,8 +94,8 @@ function validateEntry(body, mode) {
     } else if (mode === "create") details.dueAt = "dueAt is required.";
   }
 
-  if (body.kind === "routine" || (mode === "patch" && body.startDate !== undefined)) {
-    const routineFields = ["startDate", "startTime", "endTime", "repeat", "weekdays", "repeatUntil"];
+  const routineFields = ["startDate", "startTime", "endTime", "repeat", "weekdays", "repeatUntil"];
+  if (body.kind === "routine" || (mode === "patch" && routineFields.some((field) => body[field] !== undefined))) {
     if (mode === "create") {
       for (const field of ["startDate", "startTime", "endTime", "repeat", "weekdays"]) {
         if (body[field] === undefined) details[field] = `${field} is required.`;
