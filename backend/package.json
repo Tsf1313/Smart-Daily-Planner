@@ -6,14 +6,18 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "migrate": "node -r dotenv/config src/migrate.js",
+    "seed": "node -r dotenv/config src/seed.js"
   },
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
+    "dotenv": "^18.0.10",
     "express": "^5.1.0",
-    "firebase-admin": "^13.10.0",
+    "firebase-admin": "^14.5.1",
+    "multer": "^2.5.0",
     "mysql2": "^3.24.6"
   }
 }

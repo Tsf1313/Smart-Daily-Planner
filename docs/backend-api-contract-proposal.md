@@ -1,81 +1,192 @@
-# Backend API and data-contract proposal
+# Backend API contract
 
-**Status:** Draft for team review; nothing in this document is agreed or implemented.
+This contract follows [team-development-agreement.md](./team-development-agreement.md).
 
-**Scope:** Stage 1 shared agreement for the backend.
-**Basis:** The repository currently has no team contract in `docs/`, and the mobile app is an uncustomized Flutter starter. The two referenced MAD instruction PDFs were not present in the workspace when this draft was prepared.
+**Status:** Team-agreed routes and fields in this contract. Endpoint status is explicitly labeled below.
 
-Do not treat the suggested names, routes, or formats below as final. Confirm them with the owners listed in the review checklist before creating the backend project, schema, or API.
+Base URL: `/api/v1`
 
-## Proposed baseline
+Protected requests require `Authorization: Bearer <Firebase ID token>`.
 
-- One versioned REST API, rooted at `/api/v1`, shared by Flutter and the admin website.
-- Proposed stack: Node.js, Express, MySQL, and Firebase Authentication, with Firebase ID-token verification by the API. Confirm the stack as a team before adding dependencies.
-- Every authenticated request is associated with an application profile. The server derives the Firebase UID and profile from the verified token; clients do not choose an `ownerId`.
-- A user may access or change only their own entries, routine occurrences, and photos. Super Admin operations require a server-checked role. Suspended accounts are denied ordinary authenticated operations until reactivated.
-- Suggested success response: JSON `{ "data": ... }`. Suggested error response: JSON `{ "error": { "code": "...", "message": "...", "details": ... } }`. Confirm response envelopes, error codes, and pagination before clients depend on them.
-- Timestamps should use ISO 8601 with an explicit UTC offset. Whether schedule values also store an IANA timezone needs team agreement.
+## Response and error formats
 
-## Entry and routine model proposal
+Success: `{ "data": {} }`
 
-Suggested shared entry fields:
+List: `{ "data": { "items": [], "page": 1, "pageSize": 20, "total": 0 } }`
 
-| Field | Suggested meaning |
-| --- | --- |
-| `id` | Server-issued stable entry identifier |
-| `ownerId` | Server-owned application-profile identifier; never trusted from a write request |
-| `kind` | `deadline` or `routine` |
-| `title` | Required display title |
-| `description` | Optional text |
-| `createdAt`, `updatedAt` | Server-managed timestamps |
+Error:
 
-Deadline-specific fields, schedule/reminder settings, routine recurrence fields, enumerations, nullability, and validation limits remain open. SHAHDAYANA and TSF should confirm the actual model and field names against the mobile/admin needs before implementation.
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Please check the submitted fields.",
+    "details": { "title": "Title is required." }
+  }
+}
+```
 
-Routine completion should be recorded per occurrence, not by marking the routine template complete. The API needs a bounded occurrence query (suggested shape: `from` and `to` date-time query parameters) and a stable occurrence identifier. SHAHDAYANA and the backend owner must agree whether IDs are generated from the routine plus scheduled time or stored as server-issued records, and how timezone/DST changes affect them.
+`GET /health` is public and returns `{ "status": "ok" }`.
 
-## First journey endpoint sketch
+## Endpoint status
 
-These are proposals to review, not client-ready contracts:
-
-| Operation | Suggested route | Purpose |
+| Method and route | Status | Purpose |
 | --- | --- | --- |
-| Get current profile | `GET /api/v1/me` | Return the authenticated application profile and permitted capabilities |
-| Create a deadline | `POST /api/v1/entries` | Create an owned deadline |
-| List schedule entries | `GET /api/v1/entries?from=...&to=...` | Return only the caller's entries in the requested date range |
-| Complete a deadline | `POST /api/v1/entries/{entryId}/completion` | Complete an owned deadline |
-| List routine occurrences | `GET /api/v1/routines/{routineId}/occurrences?from=...&to=...` | Return occurrences in a bounded range |
-| Complete a routine occurrence | `POST /api/v1/routines/{routineId}/occurrences/{occurrenceId}/completion` | Record completion for that occurrence only |
+| `GET /health` | Implemented | Health check |
+| `GET /api/v1/me` | Implemented | Get/create profile |
+| `PATCH /api/v1/me` | Implemented | Update name |
+| `POST /api/v1/entries` | Implemented | Create deadline/routine |
+| `GET /api/v1/entries?from=&to=&page=&pageSize=` | Implemented | List owned entries; range max 31 days |
+| `GET /api/v1/entries/{id}` | Implemented | View owned entry |
+| `PATCH /api/v1/entries/{id}` | Implemented | Edit owned entry |
+| `DELETE /api/v1/entries/{id}` | Implemented | Delete owned entry |
+| `PUT /api/v1/entries/{id}/completion` | Implemented | Set deadline completion |
+| `GET /api/v1/routine-occurrences?from=&to=` | Implemented | List owned occurrences; range max 31 days |
+| `PUT /api/v1/routine-occurrences/{id}/completion` | Implemented | Set occurrence completion |
+| `GET /api/v1/facilities?latitude=&longitude=&radiusMeters=5000` | Implemented | Search active facilities nearest first |
+| `POST /api/v1/photos` | Implemented | Upload JPEG/PNG, max 5 MB |
+| `GET /api/v1/photos/{id}` | Implemented | Return owned image content |
+| `DELETE /api/v1/photos/{id}` | Implemented | Delete unreferenced owned photo |
+| `GET /api/v1/admin/users?search=&page=&pageSize=` | Implemented | List/search accounts |
+| `PATCH /api/v1/admin/users/{id}/status` | Implemented | Suspend/reactivate account |
+| `GET /api/v1/admin/facilities?active=` | Implemented | List facilities |
+| `POST /api/v1/admin/facilities` | Implemented | Create facility |
+| `PATCH /api/v1/admin/facilities/{id}` | Implemented | Edit/deactivate facility |
+| `GET /api/v1/admin/actions?targetId=` | Implemented | List admin action history |
 
-Confirm naming, methods, request and response schemas, validation errors, date-range bounds, and whether create/update/list operations need pagination before integration.
+## Profile
 
-## Facility, photo, and reminder decisions
+`GET /api/v1/me` creates a student profile on first successful Firebase verification.
 
-Dominic to confirm the service contract before implementation:
+```json
+{
+  "data": {
+    "id": "application-profile-id",
+    "firebaseUid": "firebase-uid",
+    "name": "Student",
+    "email": "student@example.test",
+    "role": "student",
+    "status": "active",
+    "createdAt": "2026-11-24T09:30:00.000Z",
+    "updatedAt": "2026-11-24T09:30:00.000Z"
+  }
+}
+```
 
-- Facility search inputs and outputs, including what “near UTS” means, supported filters, distance units, and empty-result behavior.
-- Photo upload and access flow, accepted file constraints, authorization checks, storage response fields, and deletion behavior. Photo access must remain protected and ownership-checked.
-- Reminder settings fields, validation, and how the API returns settings to mobile/web. Flutter owns local reminder scheduling; the API does not schedule local notifications.
+`PATCH /api/v1/me` accepts only `{ "name": "Student Name" }`; name is required, trimmed, and 1–100 characters.
 
-No storage provider, upload protocol, radius, or reminder field names are selected in this draft.
+## Entries
 
-## Super Admin proposal
+Deadline creation:
 
-Lim to confirm exact routes, payloads, response fields, and role rules for:
+```json
+{
+  "kind": "deadline",
+  "title": "Submit MAD report",
+  "description": "Upload the final PDF",
+  "timeZone": "Asia/Kuala_Lumpur",
+  "dueAt": "2026-11-25T09:00:00Z",
+  "reminderMinutes": 30,
+  "location": null,
+  "photoId": null
+}
+```
 
-- Searching accounts.
-- Suspending and reactivating accounts.
-- Managing facilities.
-- Reading administrative action history.
+Routine creation:
 
-All such routes should be inaccessible to ordinary users and should record the acting administrator, target, action, and timestamp in an audit history. The exact audit schema, search filters, and suspension semantics remain pending Lim's confirmation.
+```json
+{
+  "kind": "routine",
+  "title": "Study",
+  "description": null,
+  "timeZone": "Asia/Kuala_Lumpur",
+  "startDate": "2026-11-25",
+  "startTime": "20:00",
+  "endTime": "21:00",
+  "repeat": "weekly",
+  "weekdays": [1, 3, 5],
+  "repeatUntil": null,
+  "reminderMinutes": 15,
+  "location": null,
+  "photoId": null
+}
+```
 
-## Review checklist before backend integration
+Creation may not submit `id`, `ownerId`, `createdAt`, or `updatedAt`.
 
-- [ ] TSF and SHAHDAYANA agree on entry and routine fields, enum values, validation, API routes, and response/error formats.
-- [ ] SHAHDAYANA and backend agree on routine occurrence generation, stable IDs, bounded date queries, and per-occurrence completion.
-- [ ] Dominic confirms facility, photo, and reminder service inputs and outputs.
-- [ ] Lim confirms Super Admin routes, permissions, and administrative action history.
-- [ ] Team confirms the Node.js/Express, MySQL, and Firebase Authentication stack.
-- [ ] Team confirms the shared contract is recorded and ready for client integration.
+PATCH uses omission for unchanged fields and `null` to clear nullable fields. `kind` cannot change.
 
-Until these items are confirmed, this proposal does not authorize creating backend dependencies, migrations, or implementation code.
+Deadline completion body:
+
+```json
+{ "isCompleted": true }
+```
+
+Occurrence completion body:
+
+```json
+{ "isCompleted": false }
+```
+
+`GET /api/v1/routine-occurrences` returns:
+
+```json
+{
+  "data": {
+    "items": [
+      {
+        "id": "occurrence-id",
+        "entryId": "routine-entry-id",
+        "date": "2026-11-25",
+        "startAt": "2026-11-25T12:00:00.000Z",
+        "endAt": "2026-11-25T13:00:00.000Z",
+        "isCompleted": false
+      }
+    ]
+  }
+}
+```
+
+## Facilities and photos
+
+Facility search response items contain `facilityId`, `name`, `latitude`, `longitude`, and `distanceMeters`. Default radius is 5,000 metres; maximum is 50,000 metres.
+
+Create facility:
+
+```json
+{
+  "name": "Sample Campus Library",
+  "latitude": 2.3,
+  "longitude": 111.8,
+  "isActive": true
+}
+```
+
+Upload uses multipart/form-data with field name `file`. Maximum size: 5 MB. The route returns:
+
+```json
+{ "data": { "id": "photo-id", "mimeType": "image/png", "sizeBytes": 1234, "createdAt": "2026-11-24T09:30:00.000Z" } }
+```
+
+Photo content is returned as its image MIME type, not a JSON envelope.
+
+## Admin
+
+Suspend/reactivate:
+
+```json
+{ "status": "suspended" }
+```
+
+An admin cannot suspend or reactivate their own account.
+
+## Error status codes
+
+- `400` `VALIDATION_ERROR`
+- `401` `UNAUTHENTICATED`
+- `403` `ACCOUNT_SUSPENDED` or `FORBIDDEN`
+- `404` `NOT_FOUND`
+- `409` `CONFLICT`
+- `413` `UPLOAD_TOO_LARGE`
+- `415` `UNSUPPORTED_MEDIA_TYPE`
+- `500` `INTERNAL_ERROR`
