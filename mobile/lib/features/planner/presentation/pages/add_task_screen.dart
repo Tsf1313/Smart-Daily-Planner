@@ -2,12 +2,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../../app/app_theme.dart';
-import '../../data/models/task_model.dart' hide TimeOfDay;
+import '../../data/models/task_model.dart' as model;
 import '../../../locations/data/models/selected_facility.dart';
 import '../../../locations/presentation/pages/location_picker_page.dart';
 
 class AddTaskScreen extends StatefulWidget {
-  final Task? task; // null = add, non-null = edit
+  final model.Task? task; // null = add, non-null with id = edit
   const AddTaskScreen({super.key, this.task});
 
   @override
@@ -19,18 +19,17 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
   late TextEditingController _titleController;
   late TextEditingController _descriptionController;
 
-  // 'routine' or 'deadline' matching Figma & Team Development Agreement
+  // 'routine' or 'deadline'
   String _entryType = 'deadline';
   String _selectedCategory = 'Study';
   String _selectedPriority = 'medium';
   DateTime _selectedDate = DateTime.now();
-  TimeOfDay _selectedTime = TimeOfDay.now();
   TimeOfDay _startTime = const TimeOfDay(hour: 9, minute: 0);
-  TimeOfDay _endTime = const TimeOfDay(hour: 10, minute: 0);
+  TimeOfDay _endTime = const TimeOfDay(hour: 11, minute: 0);
 
-  // Repeat options for Routine
-  String _repeatRule = 'never'; // 'never', 'daily', 'weekdays'
-  final Set<int> _selectedWeekdays = {1, 3, 5}; // Mon=1 .. Sun=7
+  // Repeat options for Routine: 'never', 'daily', 'weekdays' (weekly)
+  String _repeatRule = 'never';
+  Set<int> _selectedWeekdays = {1}; // Monday=1 .. Sunday=7
 
   // Reminder options: null (Off), 15, or 30
   int? _reminderMinutes;
@@ -42,24 +41,55 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
 
   final List<String> _categories = ['Study', 'Assignment', 'Health', 'Personal'];
 
-  bool get isEditing => widget.task != null && widget.task!.title.isNotEmpty;
+  bool get isEditing => widget.task != null && widget.task!.id != null;
 
   @override
   void initState() {
     super.initState();
     _titleController = TextEditingController(text: widget.task?.title ?? '');
     _descriptionController = TextEditingController(text: widget.task?.description ?? '');
-    if (widget.task != null) {
-      _selectedCategory = _categories.contains(widget.task!.category)
-          ? widget.task!.category
+
+    final existing = widget.task;
+    if (existing != null) {
+      _entryType = existing.type;
+      _selectedCategory = _categories.contains(existing.category)
+          ? existing.category
           : 'Study';
-      _selectedPriority = widget.task!.priority;
-      _selectedDate = widget.task!.dueDate;
-      _reminderMinutes = widget.task!.reminderEnabled ? 15 : null;
-      _locationName = widget.task!.locationName;
-      _latitude = widget.task!.latitude;
-      _longitude = widget.task!.longitude;
-      _photoPath = widget.task!.photoPath;
+      _selectedPriority = existing.priority;
+      _selectedDate = DateTime(
+        existing.dueDate.year,
+        existing.dueDate.month,
+        existing.dueDate.day,
+      );
+
+      if (existing.startTime != null) {
+        _startTime = TimeOfDay(
+          hour: existing.startTime!.hour,
+          minute: existing.startTime!.minute,
+        );
+      }
+      if (existing.endTime != null) {
+        _endTime = TimeOfDay(
+          hour: existing.endTime!.hour,
+          minute: existing.endTime!.minute,
+        );
+      }
+
+      _repeatRule = existing.repeatRule ?? 'never';
+      if (existing.weekdays.isNotEmpty) {
+        _selectedWeekdays = existing.weekdays.toSet();
+      } else {
+        _selectedWeekdays = {_selectedDate.weekday};
+      }
+
+      _reminderMinutes =
+          existing.reminderMinutes ?? (existing.reminderEnabled ? 15 : null);
+      _locationName = existing.locationName;
+      _latitude = existing.latitude;
+      _longitude = existing.longitude;
+      _photoPath = existing.photoPath;
+    } else {
+      _selectedWeekdays = {_selectedDate.weekday};
     }
   }
 
@@ -96,25 +126,22 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Entry Type Switcher (Routine Activity vs Deadline Task) matching Figma
               _buildEntryTypeSwitcher(),
               const SizedBox(height: 20),
 
-              // Task title
               _buildSectionLabel(_entryType == 'routine' ? 'ROUTINE TITLE' : 'TASK TITLE'),
               TextFormField(
                 controller: _titleController,
                 decoration: InputDecoration(
                   hintText: _entryType == 'routine'
-                      ? 'e.g. Morning Jog at 7 AM'
-                      : 'e.g. Submit Assignment Report',
+                      ? 'e.g. Monday study'
+                      : 'e.g. Submit report',
                   prefixIcon: const Icon(Icons.task_alt_outlined, color: AppColors.textHint),
                 ),
                 validator: (v) => (v == null || v.trim().isEmpty) ? 'Title is required' : null,
               ),
               const SizedBox(height: 18),
 
-              // Description
               _buildSectionLabel('DESCRIPTION'),
               TextFormField(
                 controller: _descriptionController,
@@ -126,21 +153,16 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
               ),
               const SizedBox(height: 18),
 
-              // Category
               _buildSectionLabel('CATEGORY'),
               _buildCategorySelector(),
               const SizedBox(height: 18),
 
-              // Priority
               _buildSectionLabel('PRIORITY LEVEL'),
               _buildPrioritySelector(),
               const SizedBox(height: 18),
 
-              // Schedule fields depend on Routine vs Deadline
               if (_entryType == 'routine') ...[
-                _buildSectionLabel('START DATE & TIME'),
-                _buildDatePicker(),
-                const SizedBox(height: 12),
+                _buildSectionLabel('TIME'),
                 Row(
                   children: [
                     Expanded(
@@ -161,45 +183,41 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
                   ],
                 ),
                 const SizedBox(height: 18),
-                _buildSectionLabel('REPEAT RULE'),
+                _buildSectionLabel('REPEAT'),
                 _buildRepeatSelector(),
                 if (_repeatRule == 'weekdays') ...[
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 14),
+                  _buildSectionLabel('REPEAT DAYS'),
                   _buildWeekdaySelector(),
                 ],
+                const SizedBox(height: 14),
+                _buildSectionLabel(_repeatRule == 'never' ? 'DATE' : 'STARTS FROM'),
+                _buildDatePicker(),
               ] else ...[
-                _buildSectionLabel('DUE DATE & TIME'),
-                Row(
-                  children: [
-                    Expanded(child: _buildDatePicker()),
-                    const SizedBox(width: 12),
-                    Expanded(child: _buildTimePicker()),
-                  ],
-                ),
+                _buildSectionLabel('DUE DATE'),
+                _buildDatePicker(),
               ],
               const SizedBox(height: 18),
 
-              // Reminder options (Off, 15 min, 30 min)
               _buildSectionLabel('REMINDER'),
               _buildReminderSelector(),
               const SizedBox(height: 18),
 
-              // Location picker
               _buildLocationPicker(),
               const SizedBox(height: 12),
 
-              // Photo attachment
               _buildPhotoPicker(),
               const SizedBox(height: 28),
 
-              // Save button
               ElevatedButton.icon(
                 onPressed: _saveTask,
                 icon: const Icon(Icons.save_outlined),
                 label: Text(
                   isEditing
                       ? 'Update Task'
-                      : (_entryType == 'routine' ? 'Save Routine Activity' : 'Save Deadline Task'),
+                      : (_entryType == 'routine'
+                          ? 'Save Routine Activity'
+                          : 'Save Deadline Task'),
                 ),
               ),
               const SizedBox(height: 16),
@@ -366,7 +384,7 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
   }
 
   Widget _buildRepeatSelector() {
-    final options = [('never', 'Never'), ('daily', 'Daily'), ('weekdays', 'Weekdays')];
+    final options = [('never', 'Never'), ('daily', 'Daily'), ('weekdays', 'Weekly')];
     return Row(
       children: options.map((opt) {
         final (val, label) = opt;
@@ -404,31 +422,44 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
   }
 
   Widget _buildWeekdaySelector() {
-    const labels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: List.generate(7, (i) {
         final day = i + 1;
         final isSelected = _selectedWeekdays.contains(day);
-        return GestureDetector(
-          onTap: () {
-            setState(() {
-              if (isSelected && _selectedWeekdays.length > 1) {
-                _selectedWeekdays.remove(day);
-              } else {
-                _selectedWeekdays.add(day);
-              }
-            });
-          },
-          child: CircleAvatar(
-            radius: 18,
-            backgroundColor: isSelected ? AppColors.primary : AppColors.surface,
-            child: Text(
-              labels[i],
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: isSelected ? Colors.white : AppColors.textSecondary,
+        return Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  if (isSelected && _selectedWeekdays.length > 1) {
+                    _selectedWeekdays.remove(day);
+                  } else {
+                    _selectedWeekdays.add(day);
+                  }
+                });
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: isSelected ? AppColors.primary : AppColors.surface,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isSelected ? AppColors.primary : const Color(0xFFE5E7EB),
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  labels[i],
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: isSelected ? Colors.white : AppColors.textSecondary,
+                  ),
+                ),
               ),
             ),
           ),
@@ -461,30 +492,6 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
     );
   }
 
-  Widget _buildTimePicker() {
-    return GestureDetector(
-      onTap: _pickTime,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.access_time, size: 16, color: AppColors.primary),
-            const SizedBox(width: 8),
-            Text(
-              _selectedTime.format(context),
-              style: const TextStyle(fontSize: 13, color: AppColors.textPrimary),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildTimeBox({
     required String label,
     required TimeOfDay time,
@@ -508,7 +515,8 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
               children: [
                 const Icon(Icons.access_time, size: 15, color: AppColors.primary),
                 const SizedBox(width: 6),
-                Text(time.format(context), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                Text(time.format(context),
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
               ],
             ),
           ],
@@ -630,7 +638,8 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
                   const Icon(Icons.photo_camera_outlined, color: AppColors.primary, size: 20),
                   const SizedBox(width: 12),
                   const Expanded(
-                    child: Text('Attach Photo / Note', style: TextStyle(fontSize: 14, color: AppColors.textHint)),
+                    child: Text('Attach Photo / Note',
+                        style: TextStyle(fontSize: 14, color: AppColors.textHint)),
                   ),
                   Text(
                     'Optional',
@@ -656,20 +665,6 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
       ),
     );
     if (picked != null) setState(() => _selectedDate = picked);
-  }
-
-  Future<void> _pickTime() async {
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: _selectedTime,
-      builder: (context, child) => Theme(
-        data: Theme.of(context).copyWith(
-          colorScheme: const ColorScheme.light(primary: AppColors.primary),
-        ),
-        child: child!,
-      ),
-    );
-    if (picked != null) setState(() => _selectedTime = picked);
   }
 
   Future<void> _pickCustomTime({required bool isStart}) async {
@@ -704,6 +699,7 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
     if (result != null) {
       setState(() {
         _locationName = result.name;
+        
       });
     }
   }
@@ -765,23 +761,46 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
 
   void _saveTask() {
     if (_formKey.currentState!.validate()) {
-      final combinedDate = DateTime(
+      final dateOnly = DateTime(
         _selectedDate.year,
         _selectedDate.month,
         _selectedDate.day,
-        _entryType == 'routine' ? _startTime.hour : _selectedTime.hour,
-        _entryType == 'routine' ? _startTime.minute : _selectedTime.minute,
       );
 
-      final task = Task(
+      final isRoutine = _entryType == 'routine';
+      if (isRoutine) {
+        final startMins = _startTime.hour * 60 + _startTime.minute;
+        final endMins = _endTime.hour * 60 + _endTime.minute;
+        if (endMins <= startMins) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('End time must be after start time.')),
+          );
+          return;
+        }
+      }
+
+      final sortedWeekdays = _selectedWeekdays.toList()..sort();
+
+      final task = model.Task(
         id: widget.task?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
+        type: _entryType,
         title: _titleController.text.trim(),
         description: _descriptionController.text.trim(),
         category: _selectedCategory,
         priority: _selectedPriority,
-        dueDate: combinedDate,
+        dueDate: dateOnly,
+        startTime: isRoutine
+            ? model.TimeOfDay(hour: _startTime.hour, minute: _startTime.minute)
+            : null,
+        endTime: isRoutine
+            ? model.TimeOfDay(hour: _endTime.hour, minute: _endTime.minute)
+            : null,
+        repeatRule: isRoutine ? _repeatRule : null,
+        weekdays: isRoutine && _repeatRule == 'weekdays' ? sortedWeekdays : const [],
         isCompleted: widget.task?.isCompleted ?? false,
+        completedDates: widget.task?.completedDates ?? const {},
         reminderEnabled: _reminderMinutes != null,
+        reminderMinutes: _reminderMinutes,
         locationName: _locationName,
         latitude: _latitude,
         longitude: _longitude,

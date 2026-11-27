@@ -20,6 +20,7 @@ class TaskStore extends ChangeNotifier {
   final List<Task> _tasks = [
     Task(
       id: '1',
+      type: 'deadline',
       title: 'Submit Assignment Report',
       description: 'Upload final PDF for CSS3344 Mobile App Development.',
       category: 'Assignment',
@@ -28,15 +29,15 @@ class TaskStore extends ChangeNotifier {
         DateTime.now().year,
         DateTime.now().month,
         DateTime.now().day,
-        14,
-        0,
       ),
       isCompleted: false,
       reminderEnabled: true,
+      reminderMinutes: 30,
       locationName: 'UTS Library',
     ),
     Task(
       id: '2',
+      type: 'deadline',
       title: 'Library Book Return',
       description: 'Return Flutter & Dart reference books at counter.',
       category: 'Personal',
@@ -45,15 +46,15 @@ class TaskStore extends ChangeNotifier {
         DateTime.now().year,
         DateTime.now().month,
         DateTime.now().day,
-        11,
-        0,
       ),
       isCompleted: false,
       reminderEnabled: true,
+      reminderMinutes: 15,
       locationName: 'UTS Library',
     ),
     Task(
       id: '3',
+      type: 'routine',
       title: 'Morning Lecture – CSC301',
       description: 'Software Engineering lecture at Chancellor Hall.',
       category: 'Study',
@@ -62,43 +63,62 @@ class TaskStore extends ChangeNotifier {
         DateTime.now().year,
         DateTime.now().month,
         DateTime.now().day,
-        9,
-        0,
       ),
-      isCompleted: true,
+      startTime: const TimeOfDay(hour: 9, minute: 0),
+      endTime: const TimeOfDay(hour: 11, minute: 0),
+      repeatRule: 'weekdays',
+      weekdays: const [1, 3, 5],
+      completedDates: {Task.dateKey(DateTime.now())},
       reminderEnabled: true,
+      reminderMinutes: 15,
       locationName: 'Chancellor Hall',
     ),
     Task(
       id: '4',
+      type: 'deadline',
       title: 'Study for Midterm',
       description: 'Chapter 1–5 revision and past year questions.',
       category: 'Study',
       priority: 'low',
-      dueDate: DateTime.now().add(const Duration(days: 2)),
+      dueDate: DateTime(
+        DateTime.now().year,
+        DateTime.now().month,
+        DateTime.now().day,
+      ).add(const Duration(days: 2)),
       isCompleted: false,
       reminderEnabled: false,
     ),
     Task(
       id: '5',
+      type: 'deadline',
       title: 'Overdue Lab Report',
       description: 'Submit lab sheet 4 to lecturer.',
       category: 'Assignment',
       priority: 'high',
-      dueDate: DateTime.now().subtract(const Duration(days: 1)),
+      dueDate: DateTime(
+        DateTime.now().year,
+        DateTime.now().month,
+        DateTime.now().day,
+      ).subtract(const Duration(days: 1)),
       isCompleted: false,
       reminderEnabled: true,
+      reminderMinutes: 15,
     ),
   ];
 
   List<Task> get tasks => List.unmodifiable(_tasks);
 
   int get totalCount => _tasks.length;
-  int get completedCount => _tasks.where((t) => t.isCompleted).length;
-  int get pendingCount => _tasks.where((t) => !t.isCompleted).length;
-  int get overdueCount => _tasks
-      .where((t) => !t.isCompleted && t.dueDate.isBefore(DateTime.now()))
-      .length;
+  int get completedCount =>
+      _tasks.where((t) => t.isCompletedOn(DateTime.now())).length;
+  int get pendingCount =>
+      _tasks.where((t) => !t.isCompletedOn(DateTime.now())).length;
+  int get overdueCount => _tasks.where((t) {
+        if (t.isCompletedOn(DateTime.now())) return false;
+        final today = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+        final d = DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day);
+        return d.isBefore(today);
+      }).length;
 
   void addTask(Task task) {
     _tasks.insert(0, task);
@@ -118,11 +138,10 @@ class TaskStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  void toggleComplete(String id) {
+  void toggleComplete(String id, {DateTime? date}) {
     final index = _tasks.indexWhere((t) => t.id == id);
     if (index != -1) {
-      final current = _tasks[index];
-      _tasks[index] = current.copyWith(isCompleted: !current.isCompleted);
+      _tasks[index] = _tasks[index].toggleCompletedOn(date ?? DateTime.now());
       notifyListeners();
     }
   }

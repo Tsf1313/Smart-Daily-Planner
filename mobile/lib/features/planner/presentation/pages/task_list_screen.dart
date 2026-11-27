@@ -29,10 +29,13 @@ class _TaskListScreenState extends State<TaskListScreen> {
 
   List<Task> _filterTasks(List<Task> all) {
     return all.where((t) {
+      final today = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+      final dueDay = DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day);
+      final isDoneToday = t.isCompletedOn(today);
       final matchesStatus = switch (_selectedFilter) {
-        'pending' => !t.isCompleted,
-        'done' => t.isCompleted,
-        'overdue' => !t.isCompleted && t.dueDate.isBefore(DateTime.now()),
+        'pending' => !isDoneToday,
+        'done' => isDoneToday,
+        'overdue' => !isDoneToday && dueDay.isBefore(today),
         _ => true,
       };
       final matchesCategory =
@@ -309,6 +312,7 @@ class _TaskCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDoneToday = task.isCompletedOn(DateTime.now());
     return Dismissible(
       key: Key(task.id ?? task.title),
       direction: offlineMode ? DismissDirection.none : DismissDirection.endToStart,
@@ -341,20 +345,20 @@ class _TaskCard extends StatelessWidget {
           child: Row(
             children: [
               GestureDetector(
-                onTap: () => onToggle(!task.isCompleted),
+                onTap: () => onToggle(!isDoneToday),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
                   width: 24,
                   height: 24,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: task.isCompleted ? AppColors.primary : Colors.transparent,
+                    color: isDoneToday ? AppColors.primary : Colors.transparent,
                     border: Border.all(
-                      color: task.isCompleted ? AppColors.primary : AppColors.textHint,
+                      color: isDoneToday ? AppColors.primary : AppColors.textHint,
                       width: 2,
                     ),
                   ),
-                  child: task.isCompleted
+                  child: isDoneToday
                       ? const Icon(Icons.check, size: 14, color: Colors.white)
                       : null,
                 ),
@@ -369,8 +373,8 @@ class _TaskCard extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
-                        color: task.isCompleted ? AppColors.textHint : AppColors.textPrimary,
-                        decoration: task.isCompleted ? TextDecoration.lineThrough : null,
+                        color: isDoneToday ? AppColors.textHint : AppColors.textPrimary,
+                        decoration: isDoneToday ? TextDecoration.lineThrough : null,
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -410,8 +414,12 @@ class _TaskCard extends StatelessWidget {
     );
   }
 
-  bool _isOverdue(Task task) =>
-      !task.isCompleted && task.dueDate.isBefore(DateTime.now());
+  bool _isOverdue(Task task) {
+    if (task.isCompletedOn(DateTime.now())) return false;
+    final today = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+    final dueDay = DateTime(task.dueDate.year, task.dueDate.month, task.dueDate.day);
+    return dueDay.isBefore(today);
+  }
 
   String _formatDate(DateTime date) {
     final now = DateTime.now();

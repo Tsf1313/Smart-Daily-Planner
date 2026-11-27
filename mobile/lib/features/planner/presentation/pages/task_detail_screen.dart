@@ -8,11 +8,13 @@ import 'add_task_screen.dart';
 
 class TaskDetailScreen extends StatelessWidget {
   final Task task;
-  const TaskDetailScreen({super.key, required this.task});
+  final DateTime? occurrenceDate;
+  const TaskDetailScreen({super.key, required this.task, this.occurrenceDate});
 
   @override
   Widget build(BuildContext context) {
     final store = TaskStore.instance;
+    final targetDate = occurrenceDate ?? DateTime.now();
 
     return ListenableBuilder(
       listenable: store,
@@ -21,11 +23,12 @@ class TaskDetailScreen extends StatelessWidget {
               (t) => t?.id == task.id,
               orElse: () => task,
             )!;
+        final isDone = currentTask.isCompletedOn(targetDate);
 
         return Scaffold(
           backgroundColor: AppColors.background,
           appBar: AppBar(
-            title: const Text('Task Detail'),
+            title: Text(currentTask.isRoutine ? 'Routine Detail' : 'Deadline Detail'),
             backgroundColor: AppColors.surface,
             leading: IconButton(
               icon: const Icon(Icons.arrow_back_ios),
@@ -57,7 +60,6 @@ class TaskDetailScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Header card
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(20),
@@ -77,20 +79,36 @@ class TaskDetailScreen extends StatelessWidget {
                     children: [
                       Row(
                         children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: AppColors.primaryLight,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              currentTask.isRoutine ? 'Routine' : 'Deadline',
+                              style: const TextStyle(
+                                color: AppColors.primary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
                           PriorityBadge(priority: currentTask.priority),
                           const Spacer(),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
-                              color: currentTask.isCompleted
+                              color: isDone
                                   ? AppColors.success.withOpacity(0.1)
                                   : AppColors.warning.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
-                              currentTask.isCompleted ? '✓ Completed' : 'Pending',
+                              isDone ? '✓ Completed' : 'Pending',
                               style: TextStyle(
-                                color: currentTask.isCompleted
+                                color: isDone
                                     ? AppColors.success
                                     : AppColors.warning,
                                 fontSize: 12,
@@ -121,20 +139,45 @@ class TaskDetailScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
 
-                // Details grid
                 _buildInfoGrid(currentTask),
-                const SizedBox(height: 16),
 
-                // Location
-                if (currentTask.locationName != null)
+                if (currentTask.isRoutine) ...[
+                  const SizedBox(height: 12),
+                  _buildInfoTile(
+                    Icons.access_time,
+                    'Time',
+                    _formatRoutineTime(currentTask),
+                    AppColors.primary,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildInfoTile(
+                    Icons.repeat,
+                    'Repeat',
+                    _formatRepeat(currentTask),
+                    AppColors.primary,
+                  ),
+                ],
+
+                const SizedBox(height: 12),
+                _buildInfoTile(
+                  Icons.notifications_none,
+                  'Reminder',
+                  currentTask.reminderMinutes != null
+                      ? '${currentTask.reminderMinutes} minutes before'
+                      : 'Off',
+                  AppColors.secondary,
+                ),
+
+                if (currentTask.locationName != null) ...[
+                  const SizedBox(height: 12),
                   _buildInfoTile(
                     Icons.location_on_outlined,
                     'Location',
                     currentTask.locationName!,
                     AppColors.primary,
                   ),
+                ],
 
-                // Photo
                 if (currentTask.photoPath != null) ...[
                   const SizedBox(height: 12),
                   _buildSectionLabel('Attached Photo'),
@@ -156,25 +199,24 @@ class TaskDetailScreen extends StatelessWidget {
                 ],
                 const SizedBox(height: 32),
 
-                // Complete / Reopen button
                 if (!store.offlineMode)
                   ElevatedButton.icon(
                     onPressed: () {
                       if (currentTask.id != null) {
-                        store.toggleComplete(currentTask.id!);
+                        store.toggleComplete(currentTask.id!, date: targetDate);
                       }
                       Navigator.pop(context);
                     },
                     icon: Icon(
-                      currentTask.isCompleted
+                      isDone
                           ? Icons.replay
                           : Icons.check_circle_outline,
                     ),
                     label: Text(
-                      currentTask.isCompleted ? 'Reopen Task' : 'Mark as Complete',
+                      isDone ? 'Reopen Task' : 'Mark as Complete',
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: currentTask.isCompleted
+                      backgroundColor: isDone
                           ? AppColors.warning
                           : AppColors.success,
                     ),
@@ -185,6 +227,25 @@ class TaskDetailScreen extends StatelessWidget {
         );
       },
     );
+  }
+
+  String _formatRoutineTime(Task t) {
+    final start = t.startTime?.format() ?? '09:00 AM';
+    final end = t.endTime?.format() ?? '10:00 AM';
+    return '$start – $end';
+  }
+
+  String _formatRepeat(Task t) {
+    switch (t.repeatRule) {
+      case 'daily':
+        return 'Daily';
+      case 'weekdays':
+        const names = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        if (t.weekdays.isEmpty) return 'Weekly';
+        return 'Weekly (${t.weekdays.map((d) => names[d]).join(', ')})';
+      default:
+        return 'Never';
+    }
   }
 
   void _confirmDelete(BuildContext context, TaskStore store, Task currentTask) {
@@ -203,8 +264,8 @@ class TaskDetailScreen extends StatelessWidget {
               if (currentTask.id != null) {
                 store.deleteTask(currentTask.id!);
               }
-              Navigator.pop(context); // close dialog
-              Navigator.pop(context); // exit detail screen
+              Navigator.pop(context);
+              Navigator.pop(context);
             },
             child: const Text('Delete', style: TextStyle(color: AppColors.error)),
           ),
@@ -219,8 +280,8 @@ class TaskDetailScreen extends StatelessWidget {
         Expanded(
           child: _buildInfoCard(
             Icons.calendar_today_outlined,
-            'Due Date',
-            '${t.dueDate.day}/${t.dueDate.month}/${t.dueDate.year}',
+            t.isRoutine ? 'Start Date' : 'Due Date',
+            '${t.dueDate.day} ${_monthName(t.dueDate.month)} ${t.dueDate.year}',
             AppColors.primary,
           ),
         ),
@@ -293,5 +354,13 @@ class TaskDetailScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _monthName(int month) {
+    const months = [
+      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    return months[month];
   }
 }

@@ -117,6 +117,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                   builder: (_) => AddTaskScreen(
                     task: Task(
                       title: '',
+                      type: 'deadline',
                       category: 'Study',
                       priority: 'medium',
                       dueDate: _selectedDate,
@@ -150,7 +151,6 @@ class _CalendarScreenState extends State<CalendarScreen>
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
       child: Column(
         children: [
-          // Rounded square <  November 2026  > navigation bar for both Daily & Weekly
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -207,7 +207,6 @@ class _CalendarScreenState extends State<CalendarScreen>
           ),
           const SizedBox(height: 12),
 
-          // Day strip (aligned with 48px time gutter on Weekly view)
           Row(
             children: [
               if (isWeekly) const SizedBox(width: 32),
@@ -217,7 +216,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                     final day = startOfWeek.add(Duration(days: i));
                     final isSelected = _isSameDay(day, _selectedDate);
                     final isToday = _isSameDay(day, DateTime.now());
-                    final hasTask = tasks.any((t) => _isSameDay(t.dueDate, day));
+                    final hasTask = tasks.any((t) => t.occursOn(day));
 
                     return Expanded(
                       child: GestureDetector(
@@ -227,9 +226,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                           margin: const EdgeInsets.symmetric(horizontal: 2),
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           decoration: BoxDecoration(
-                            color: isSelected
-                                ? AppColors.primary
-                                : Colors.transparent,
+                            color: isSelected ? AppColors.primary : Colors.transparent,
                             borderRadius: BorderRadius.circular(12),
                             border: isToday && !isSelected
                                 ? Border.all(color: AppColors.primary, width: 1.5)
@@ -290,205 +287,388 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   Widget _buildDayView(List<Task> tasks) {
-    final dayTasks = tasks.where((t) => _isSameDay(t.dueDate, _selectedDate)).toList();
+    final dayEntries = tasks.where((t) => t.occursOn(_selectedDate)).toList();
+    final dayDeadlines = dayEntries.where((t) => t.isDeadline).toList();
+    final dayRoutines = dayEntries.where((t) => t.isRoutine).toList();
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: 24,
-      itemBuilder: (context, hour) {
-        final hourTasks = dayTasks.where((t) => t.dueDate.hour == hour).toList();
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 50,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  _formatHour(hour),
-                  style: const TextStyle(fontSize: 11, color: AppColors.textHint),
-                  textAlign: TextAlign.right,
+    return Column(
+      children: [
+        if (dayDeadlines.isNotEmpty)
+          Container(
+            width: double.infinity,
+            color: AppColors.surface,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'DEADLINES DUE',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textSecondary,
+                    letterSpacing: 0.8,
+                  ),
                 ),
-              ),
+                const SizedBox(height: 6),
+                ...dayDeadlines.map((task) => _buildDeadlineBanner(task)),
+              ],
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+          ),
+
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: 24,
+            itemBuilder: (context, hour) {
+              final hourRoutines = dayRoutines
+                  .where((t) => (t.startTime?.hour ?? 9) == hour)
+                  .toList();
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(height: 1, color: const Color(0xFFE5E7EB)),
-                  ...hourTasks.map((task) => _buildTimelineEvent(task)),
-                  if (hourTasks.isEmpty) const SizedBox(height: 48),
+                  SizedBox(
+                    width: 50,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        _formatHour(hour),
+                        style: const TextStyle(fontSize: 11, color: AppColors.textHint),
+                        textAlign: TextAlign.right,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Container(height: 1, color: const Color(0xFFE5E7EB)),
+                        ...hourRoutines.map((task) => _buildTimelineEvent(task)),
+                        if (hourRoutines.isEmpty) const SizedBox(height: 48),
+                      ],
+                    ),
+                  ),
                 ],
-              ),
-            ),
-          ],
-        );
-      },
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
-  /// Weekly 7-column time-slot grid matching the Figma Weekly Calendar screen.
+  Widget _buildDeadlineBanner(Task task) {
+    final color = _eventAccentColor(task);
+    final isDone = task.isCompletedOn(_selectedDate);
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => TaskDetailScreen(task: task, occurrenceDate: _selectedDate),
+        ),
+      ),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: _eventBgColor(task),
+          borderRadius: BorderRadius.circular(10),
+          border: Border(left: BorderSide(color: color, width: 3)),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.flag_outlined, size: 15, color: color),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                task.title,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                  decoration: isDone ? TextDecoration.lineThrough : null,
+                ),
+              ),
+            ),
+            Text(
+              'Due',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildWeekGridView(List<Task> tasks, bool mondayStart) {
     final startOfWeek = _startOfWeek(_selectedDate, mondayStart);
     const int startHour = 7;
-    const int endHour = 21; // 7 AM to 9 PM
+    const int endHour = 21;
     const int totalHours = endHour - startHour + 1;
     const double hourHeight = 62.0;
     const double gutterWidth = 48.0;
 
+    final hasAnyDeadlinesThisWeek = List.generate(7, (i) {
+      final day = startOfWeek.add(Duration(days: i));
+      return tasks.any((t) => t.isDeadline && t.occursOn(day));
+    }).any((has) => has);
+
     return Container(
       color: AppColors.surface,
-      child: SingleChildScrollView(
-        child: SizedBox(
-          height: totalHours * hourHeight,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Left time labels column
-              SizedBox(
-                width: gutterWidth,
-                child: Column(
-                  children: List.generate(totalHours, (idx) {
-                    final hour = startHour + idx;
-                    return SizedBox(
-                      height: hourHeight,
-                      child: Align(
-                        alignment: Alignment.topRight,
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 4, right: 8),
-                          child: Text(
-                            _formatHour(hour),
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: AppColors.textHint,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
+      child: Column(
+        children: [
+          if (hasAnyDeadlinesThisWeek)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB), width: 1)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(
+                    width: gutterWidth,
+                    child: Padding(
+                      padding: EdgeInsets.only(top: 4, right: 8),
+                      child: Text(
+                        'DUE',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textHint,
                         ),
                       ),
-                    );
-                  }),
-                ),
-              ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: List.generate(7, (dayIndex) {
+                        final day = startOfWeek.add(Duration(days: dayIndex));
+                        final dayDeadlines = tasks
+                            .where((t) => t.isDeadline && t.occursOn(day))
+                            .toList();
 
-              // 7-day grid with horizontal & vertical lines + positioned event blocks
-              Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final colWidth = constraints.maxWidth / 7;
-
-                    return Stack(
-                      children: [
-                        // Background grid lines
-                        Column(
-                          children: List.generate(totalHours, (_) {
-                            return Container(
-                              height: hourHeight,
-                              decoration: const BoxDecoration(
-                                border: Border(
-                                  top: BorderSide(color: Color(0xFFF0F0F5), width: 1),
-                                ),
-                              ),
-                              child: Row(
-                                children: List.generate(7, (col) {
-                                  return Expanded(
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        border: Border(
-                                          left: BorderSide(
-                                            color: const Color(0xFFF0F0F5),
-                                            width: col == 0 ? 1 : 0.8,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                }),
-                              ),
-                            );
-                          }),
-                        ),
-
-                        // Event blocks for each day of the week
-                        ...List.generate(7, (dayIndex) {
-                          final day = startOfWeek.add(Duration(days: dayIndex));
-                          final dayTasks =
-                              tasks.where((t) => _isSameDay(t.dueDate, day)).toList();
-
-                          return dayTasks.map((task) {
-                            final clampedHour =
-                                task.dueDate.hour.clamp(startHour, endHour);
-                            final top = (clampedHour - startHour) * hourHeight +
-                                (task.dueDate.minute / 60.0) * hourHeight +
-                                2;
-                            // Give high-priority / study blocks a clean height
-                            final blockHeight = task.priority == 'high'
-                                ? hourHeight * 1.4
-                                : hourHeight * 1.15;
-
-                            final accentColor = _eventAccentColor(task);
-                            final bgColor = _eventBgColor(task);
-
-                            return Positioned(
-                              left: dayIndex * colWidth + 2,
-                              top: top,
-                              width: colWidth - 4,
-                              height: blockHeight,
-                              child: GestureDetector(
+                        return Expanded(
+                          child: Column(
+                            children: dayDeadlines.map((task) {
+                              final color = _eventAccentColor(task);
+                              final isDone = task.isCompletedOn(day);
+                              return GestureDetector(
                                 onTap: () => Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (_) => TaskDetailScreen(task: task),
+                                    builder: (_) => TaskDetailScreen(
+                                      task: task,
+                                      occurrenceDate: day,
+                                    ),
                                   ),
                                 ),
                                 child: Container(
+                                  width: double.infinity,
+                                  margin: const EdgeInsets.symmetric(
+                                      horizontal: 2, vertical: 2),
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 4, vertical: 6),
+                                      horizontal: 4, vertical: 4),
                                   decoration: BoxDecoration(
-                                    color: bgColor,
-                                    borderRadius: BorderRadius.circular(8),
+                                    color: _eventBgColor(task),
+                                    borderRadius: BorderRadius.circular(6),
                                     border: Border(
-                                      left: BorderSide(color: accentColor, width: 3),
+                                      left: BorderSide(color: color, width: 2.5),
                                     ),
                                   ),
                                   child: Text(
                                     task.title,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
-                                      fontSize: 10,
+                                      fontSize: 9,
                                       fontWeight: FontWeight.w700,
-                                      color: accentColor,
-                                      height: 1.2,
-                                      decoration: task.isCompleted
+                                      color: color,
+                                      decoration: isDone
                                           ? TextDecoration.lineThrough
                                           : null,
                                     ),
-                                    maxLines: 3,
-                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        );
+                      }),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+          Expanded(
+            child: SingleChildScrollView(
+              child: SizedBox(
+                height: totalHours * hourHeight,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: gutterWidth,
+                      child: Column(
+                        children: List.generate(totalHours, (idx) {
+                          final hour = startHour + idx;
+                          return SizedBox(
+                            height: hourHeight,
+                            child: Align(
+                              alignment: Alignment.topRight,
+                              child: Padding(
+                                padding: const EdgeInsets.only(top: 4, right: 8),
+                                child: Text(
+                                  _formatHour(hour),
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    color: AppColors.textHint,
+                                    fontWeight: FontWeight.w500,
                                   ),
                                 ),
                               ),
-                            );
-                          });
-                        }).expand((widgets) => widgets),
-                      ],
-                    );
-                  },
+                            ),
+                          );
+                        }),
+                      ),
+                    ),
+                    Expanded(
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final colWidth = constraints.maxWidth / 7;
+
+                          return Stack(
+                            children: [
+                              Column(
+                                children: List.generate(totalHours, (_) {
+                                  return Container(
+                                    height: hourHeight,
+                                    decoration: const BoxDecoration(
+                                      border: Border(
+                                        top: BorderSide(
+                                            color: Color(0xFFF0F0F5), width: 1),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: List.generate(7, (col) {
+                                        return Expanded(
+                                          child: Container(
+                                            decoration: BoxDecoration(
+                                              border: Border(
+                                                left: BorderSide(
+                                                  color: const Color(0xFFF0F0F5),
+                                                  width: col == 0 ? 1 : 0.8,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      }),
+                                    ),
+                                  );
+                                }),
+                              ),
+                              ...List.generate(7, (dayIndex) {
+                                final day = startOfWeek.add(Duration(days: dayIndex));
+                                final dayRoutines = tasks
+                                    .where((t) => t.isRoutine && t.occursOn(day))
+                                    .toList();
+
+                                return dayRoutines.map((task) {
+                                  final startH = task.startTime?.hour ?? 9;
+                                  final startM = task.startTime?.minute ?? 0;
+                                  final endH = task.endTime?.hour ?? (startH + 1);
+                                  final endM = task.endTime?.minute ?? startM;
+
+                                  final clampedStart = startH.clamp(startHour, endHour);
+                                  final top = (clampedStart - startHour) * hourHeight +
+                                      (startM / 60.0) * hourHeight +
+                                      2;
+                                  final durationHours =
+                                      ((endH * 60 + endM) - (startH * 60 + startM)) /
+                                          60.0;
+                                  final blockHeight =
+                                      (durationHours.clamp(0.75, 6.0) * hourHeight) - 4;
+
+                                  final accentColor = _eventAccentColor(task);
+                                  final bgColor = _eventBgColor(task);
+                                  final isDone = task.isCompletedOn(day);
+
+                                  return Positioned(
+                                    left: dayIndex * colWidth + 2,
+                                    top: top,
+                                    width: colWidth - 4,
+                                    height: blockHeight,
+                                    child: GestureDetector(
+                                      onTap: () => Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => TaskDetailScreen(
+                                            task: task,
+                                            occurrenceDate: day,
+                                          ),
+                                        ),
+                                      ),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 4, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: bgColor,
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border(
+                                            left: BorderSide(
+                                                color: accentColor, width: 3),
+                                          ),
+                                        ),
+                                        child: Text(
+                                          task.title,
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w700,
+                                            color: accentColor,
+                                            height: 1.2,
+                                            decoration: isDone
+                                                ? TextDecoration.lineThrough
+                                                : null,
+                                          ),
+                                          maxLines: 3,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                });
+                              }).expand((widgets) => widgets),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
 
   Widget _buildTimelineEvent(Task task) {
     final color = _eventAccentColor(task);
+    final isDone = task.isCompletedOn(_selectedDate);
+    final timeRange =
+        '${task.startTime?.formatShort() ?? '9 AM'} – ${task.endTime?.formatShort() ?? '10 AM'}';
     return GestureDetector(
       onTap: () => Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => TaskDetailScreen(task: task)),
+        MaterialPageRoute(
+          builder: (_) => TaskDetailScreen(task: task, occurrenceDate: _selectedDate),
+        ),
       ),
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
@@ -507,10 +687,10 @@ class _CalendarScreenState extends State<CalendarScreen>
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
                 color: color,
-                decoration: task.isCompleted ? TextDecoration.lineThrough : null,
+                decoration: isDone ? TextDecoration.lineThrough : null,
               ),
             ),
-            Text(task.category,
+            Text('$timeRange · ${task.category}',
                 style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
           ],
         ),
