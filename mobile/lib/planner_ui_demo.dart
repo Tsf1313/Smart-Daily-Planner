@@ -32,18 +32,7 @@ class PlannerUiDemoApp extends StatelessWidget {
 
 // Removed the previous build method that returned a MaterialApp without delegates.
 
-  const PlannerUiDemoApp({super.key});
 
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'SmartPlan Planner UI Demo',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
-      home: const _PlannerDemoShell(),
-    );
-  }
-}
 
 class _PlannerDemoShell extends StatefulWidget {
   const _PlannerDemoShell();
