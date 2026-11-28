@@ -1,10 +1,9 @@
 import 'dart:io';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../../app/app_theme.dart';
 import '../../data/models/task_model.dart' as model;
-import '../../../locations/data/models/selected_facility.dart';
-import '../../../locations/presentation/pages/location_picker_page.dart';
+import 'location_picker_screen.dart';
 
 class AddTaskScreen extends StatefulWidget {
   final model.Task? task; // null = add, non-null with id = edit
@@ -689,27 +688,18 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
     }
   }
 
-  // Sample campus facilities used while the app runs with demo data.
-  static const _sampleFacilities = [
-    SelectedFacility(id: 'library', name: 'Library'),
-    SelectedFacility(id: 'cafeteria', name: 'Cafeteria'),
-    SelectedFacility(id: 'lecture_hall', name: 'Lecture Hall'),
-    SelectedFacility(id: 'lab', name: 'Computer Lab'),
-    SelectedFacility(id: 'gym', name: 'Gymnasium'),
-  ];
-
   Future<void> _pickLocation() async {
     final result = await Navigator.push<SelectedFacility>(
       context,
       MaterialPageRoute(
-        builder: (_) => const LocationPickerPage(
-          facilities: _sampleFacilities,
-        ),
+        builder: (_) => LocationPickerScreen(initialLocation: _locationName),
       ),
     );
     if (result != null) {
       setState(() {
         _locationName = result.name;
+        _latitude = result.latitude;
+        _longitude = result.longitude;
       });
     }
   }
