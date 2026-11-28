@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'app/app_theme.dart';
 import 'features/planner/presentation/pages/task_list_screen.dart';
 import 'features/calendar/presentation/pages/calendar_screen.dart';
@@ -8,6 +8,30 @@ void main() {
 }
 
 class PlannerUiDemoApp extends StatelessWidget {
+  const PlannerUiDemoApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'SmartPlan Planner UI Demo',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.lightTheme,
+      // Add localization delegates to provide MaterialLocalizations.
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('en', ''), // English
+      ],
+      home: const _PlannerDemoShell(),
+    );
+  }
+}
+
+// Removed the previous build method that returned a MaterialApp without delegates.
+
   const PlannerUiDemoApp({super.key});
 
   @override
